@@ -1,0 +1,13 @@
+{
+  "name": "riichi-mahjong",
+  "version": "1.0.0",
+  "description": "Browser riichi mahjong with AI opponents",
+  "private": true,
+  "scripts": {
+    "test": "node test/shanten.test.js && node test/score.test.js && node test/rules.test.js && node test/ai.test.js && node test/selfplay.test.js 300 && npm run build && node test/ui.test.js",
+    "build": "node build.js"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.64.0"
+  }
+}
