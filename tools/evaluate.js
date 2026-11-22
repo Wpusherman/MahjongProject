@@ -47,6 +47,9 @@ function parseArgs(argv) {
     else if (key === '--rank') args.rank = argv[++i];
     else if (key === '--match') args.match = argv[++i];
     else if (key === '--grp') args.grp = argv[++i];
+    else if (key === '--candidate-grp') args.candidateGrp = argv[++i];
+    else if (key === '--baseline-grp') args.baselineGrp = argv[++i];
+    else if (key === '--baseline-heuristic') { args.baselineHeuristic = true; continue; }
     else if (key === '--candidate-seat') args.candidateSeat = argv[++i];
     else if (key === '--score-pattern') args.scorePattern = argv[++i];
     else if (key === '--initial-scores') args.initialScores = argv[++i].split(',').map(Number);
@@ -94,13 +97,16 @@ const usage = [
   '  --initial-scores L   comma-separated four starting scores (overrides --score-pattern)',
   '  --start-states FILE  JSONL of real hand-start states (scores, dealer, honba, riichiSticks, handIndex)',
   '  --effect L           comma-separated effect sizes for the power report (default: 0.2,0.5,1.0)',
-  '  --root-candidates N  root candidates for the fast profile (default: 5)',
+  '  --root-candidates N  root candidates for the fast profile (default: 12)',
   '  --fast               evaluation-only fast profile (fewer root candidates, no lookahead)',
   '  --workers N          worker threads (default: CPU-1, max 8)',
   '  --seed N             first seed (default: 20261020)',
   '  --rank NAME          tenhou|mleague|raw (default: tenhou)',
   '  --match MODE         tonpu|hanchan: play a full match so standings change (default: one hand)',
   '  --grp FILE           learned GRP JSON model; replaces the heuristic rank EV (both sides)',
+  '  --candidate-grp FILE use a GRP rank model for the candidate only',
+  '  --baseline-grp FILE  use a GRP rank model for the baseline only',
+  '  --baseline-heuristic force the heuristic rank EV for the baseline (overrides a global --grp)',
   '  --dealer N           fixed dealer seat (default: seed-dependent)',
   '  --control            also run baseline-vs-baseline and report paired delta',
   '  --profile            per-hand phase timings (shanten, ukeire, shape, scoring, lookahead)',
@@ -147,6 +153,9 @@ async function evaluate(params) {
   if (args.help) { console.log(usage); return; }
   const grpModel = args.grp ? JSON.parse(fs.readFileSync(args.grp, 'utf8')) : null;
   if (grpModel) MJ.rank.setRankModel(grpModel);
+  const candidateRankModel = args.candidateGrp ? MJ.grp.validateModel(JSON.parse(fs.readFileSync(args.candidateGrp, 'utf8'))) : undefined;
+  const baselineRankModel = args.baselineHeuristic ? null
+    : args.baselineGrp ? MJ.grp.validateModel(JSON.parse(fs.readFileSync(args.baselineGrp, 'utf8'))) : undefined;
   const candidateWeights = args.candidate ? loadWeights(args.candidate) : MJ.ai.weights;
   const baselineWeights = args.baseline ? loadWeights(args.baseline) : MJ.ai.weights;
   const startStates = args.startStatesFile ? loadStartStates(args.startStatesFile) : null;
@@ -159,7 +168,7 @@ async function evaluate(params) {
     initialScores: Array.isArray(args.initialScores) && args.initialScores.length === 4 && args.initialScores.every(Number.isFinite)
       ? args.initialScores : null,
     startStates, rootCandidates: Number.isFinite(args.rootCandidates) ? args.rootCandidates : undefined,
-    grpModel, profile: !!args.profile,
+    grpModel, candidateRankModel, baselineRankModel, profile: !!args.profile,
     dealer: Number.isFinite(args.dealer) ? args.dealer : undefined };
   const seatsPerSeed = common.candidateSeatMode === 'rotate' ? 4 : 1;
   console.log(`evaluating ${args.seeds} seeds (${args.seeds * seatsPerSeed} games), workers=${args.workers}, match=${common.matchMode || 'single-hand'}, seat=${common.candidateSeatMode}, scores=${startStates ? 'start-states:' + startStates.length : common.initialScores ? 'custom' : common.scorePattern}, level=${common.candidateLevel}/${common.baselineLevel}, rankBias=${common.candidateRankBias}/${common.baselineRankBias}`);
@@ -171,6 +180,7 @@ async function evaluate(params) {
     console.log('control: baseline vs baseline');
     const controlRun = await evaluate({ ...common, candidateWeights: baselineWeights, baselineWeights,
       candidateLevel: common.baselineLevel, baselineLevel: common.baselineLevel,
+      candidateRankModel: common.baselineRankModel, baselineRankModel: common.baselineRankModel,
       candidateRankBias: common.baselineRankBias, baselineRankBias: common.baselineRankBias });
     controlRows = controlRun.rows; controlProfile = controlRun.profile;
   }
@@ -190,7 +200,9 @@ async function evaluate(params) {
       startStates: startStates ? startStates.length : 0,
       candidateLevel: common.candidateLevel, baselineLevel: common.baselineLevel,
       candidate: args.candidate || 'built-in', baseline: args.baseline || 'built-in', control: !!args.control,
-      grp: args.grp || null, rootCandidates: common.rootCandidates || null,
+      grp: args.grp || null, candidateGrp: args.candidateGrp || null,
+      baselineGrp: args.baselineHeuristic ? 'heuristic' : args.baselineGrp || null,
+      rootCandidates: common.rootCandidates || null,
       candidateRankBias: common.candidateRankBias, baselineRankBias: common.baselineRankBias },
     candidate, control, delta, power, throughput: { elapsedMs, gamesPerSecond },
     profile: candidateRun.profile,

@@ -82,4 +82,4 @@ const jointPoints = R.expectedPoints([32000, 27000, 23000, 18000], 0, 0, 'tenhou
 assert(Math.abs(jointPoints.probabilities.reduce((a, b) => a + b, 0) - 1) < 1e-6);
 R.clearRankModel();
 
-console.log('GRP OK: versioned features, match-grouped dataset, rank labels, Sinkhorn matrix, model loading and rank EV replacement');
+console.log('GRP OK: versioned features, match-grouped dataset, rank labels, 24-permutation matrix, model loading and rank EV replacement');

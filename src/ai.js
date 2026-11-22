@@ -53,10 +53,11 @@
   };
   // Rank-point pressure: leaders value a point lost more than a point gained,
   // trailers need to push. Without standings information this is neutral.
-  function rankBias(view, enabled = true) {
+  function rankBias(view, enabled = true, model) {
     if (!enabled || !MJ.rank || !Array.isArray(view.scores) || view.scores.length !== 4 || view.handsLeft == null) return 1;
     try { return MJ.rank.riskBias(view.scores, view.seat, view.rankConfig, { handsLeft: view.handsLeft,
-      honba: view.honba, riichiSticks: view.riichiSticks, handIndex: view.handIndex, dealer: view.dealer }); }
+      honba: view.honba, riichiSticks: view.riichiSticks, handIndex: view.handIndex, dealer: view.dealer,
+      model }); }
     catch (_) { return 1; }
   }
 
@@ -127,61 +128,79 @@
       }
       growthValue[t] = value;
     }
-    const taatsuValue = (kind, waits) => {
-      let sum = 0;
-      for (const t of waits) sum += unseen[t];
-      return sum * (kind === 'ryanmen' ? 1 : kind === 'kanchan' ? 0.82 : 0.68);
+    const values = [], spares = [];
+    const insertDesc = (list, value) => {
+      let i = list.length;
+      while (i > 0 && list[i - 1] < value) { list[i] = list[i - 1]; i--; }
+      list[i] = value;
     };
     function finish(sets) {
-      // Count the current groups without allocating filtered arrays.
-      let head = false, pairs = 0, incomplete = 0, ryanmen = 0, weak = 0;
-      const values = [];
+      // Reuse the two small arrays: most leaves only need a scalar comparison,
+      // so plan records are allocated only when they become the current best.
+      let head = false, pairs = 0, incomplete = 0, ryanmen = 0, weak = 0, slots = 0, quality = 0;
+      values.length = 0;
       for (const g of groups) {
         if (g.kind === 'set') continue;
         incomplete++;
         if (g.kind === 'pair') { head = true; pairs++; }
         else if (g.kind === 'ryanmen') ryanmen++;
         else weak++;
-        values.push(g.value);
+        insertDesc(values, g.value);
       }
       const sh = 8 - 2 * (sets + meldCount) - Math.min(4 - sets - meldCount, incomplete - Number(head)) - Number(head);
       const blocks = groups.length + meldCount;
-      let quality = 0;
-      values.sort((a, b) => b - a);
-      for (let i = 0; i < values.length; i++) quality += values[i] * (i < 5 - sets - meldCount ? 1 : 0.12);
-      const spare = [];
-      for (const t of singles) spare.push(growthValue[t]);
-      spare.sort((a, b) => b - a);
+      slots = 5 - sets - meldCount;
+      for (let i = 0; i < values.length; i++) quality += values[i] * (i < slots ? 1 : 0.12);
+      spares.length = 0;
+      for (const t of singles) insertDesc(spares, growthValue[t]);
       // Spare central tiles can replace bad taatsu even at five blocks.
       const spareWeight = blocks < 5 ? w.spareLow : w.spareFive;
-      for (let i = 0; i < spare.length; i++) quality += spare[i] * spareWeight / (i + 1);
+      for (let i = 0; i < spares.length; i++) quality += spares[i] * spareWeight / (i + 1);
       if (head) quality += w.headBonus;
       if (pairs === 2) quality += w.secondPairBonus; // alternative heads / triplet completion
       const value = -sh * 100 + quality;
-      const plan = { blocks, head, pairs, ryanmen, weak, quality, sh, value };
-      if (blocks === 5 && (!five || value > five.value)) five = plan;
-      if (blocks === 6 && (!six || value > six.value)) six = plan;
-      if (!best || value > best.value) best = plan;
+      if (blocks === 5 && (!five || value > five.value)) {
+        five = { blocks, head, pairs, ryanmen, weak, quality, sh, value };
+      }
+      if (blocks === 6 && (!six || value > six.value)) {
+        six = { blocks, head, pairs, ryanmen, weak, quality, sh, value };
+      }
+      if (!best || value > best.value) {
+        best = { blocks, head, pairs, ryanmen, weak, quality, sh, value };
+      }
+    }
+    // Reuse group objects by depth; no per-branch arrays or objects.
+    const pool = [];
+    function pushGroup(depth, kind, t, value) {
+      const g = pool[depth] || (pool[depth] = {});
+      g.kind = kind; g.t = t; g.value = value;
+      groups.push(g);
+      return g;
     }
     function walk(start, sets) {
       while (start < 34 && !c[start]) start++;
       if (start === 34) { finish(sets); return; }
       if (groups.length + meldCount > 6 || sets + meldCount > 4) return;
-      const t = start, n = t % 9;
-      function use(tiles, group, set) {
-        tiles.forEach((x) => c[x]--);
-        if (!set) group.value = group.kind === 'pair' ? pairValue[t] : taatsuValue(group.kind, group.waits);
-        groups.push(group); walk(t, sets + Number(set)); groups.pop();
-        tiles.forEach((x) => c[x]++);
+      const t = start, n = t % 9, depth = groups.length;
+      if (c[t] >= 3) {
+        c[t] -= 3; pushGroup(depth, 'set', t, 0); walk(t, sets + 1); groups.pop(); c[t] += 3;
       }
-      if (c[t] >= 3) use([t, t, t], { kind: 'set' }, true);
-      if (t < 27 && n <= 6 && c[t + 1] && c[t + 2]) use([t, t + 1, t + 2], { kind: 'set' }, true);
-      if (c[t] >= 2) use([t, t], { kind: 'pair', t }, false);
+      if (t < 27 && n <= 6 && c[t + 1] && c[t + 2]) {
+        c[t]--; c[t + 1]--; c[t + 2]--; pushGroup(depth, 'set', t, 0); walk(t, sets + 1);
+        groups.pop(); c[t]++; c[t + 1]++; c[t + 2]++;
+      }
+      if (c[t] >= 2) {
+        c[t] -= 2; pushGroup(depth, 'pair', t, pairValue[t]); walk(t, sets); groups.pop(); c[t] += 2;
+      }
       if (t < 27 && n <= 7 && c[t + 1]) {
-        const waits = []; if (n > 0) waits.push(t - 1); if (n < 7) waits.push(t + 2);
-        use([t, t + 1], { kind: waits.length === 2 ? 'ryanmen' : 'penchan', waits }, false);
+        const value = (unseen[t] + unseen[t + 1]) * (n > 0 && n < 7 ? 1 : 0.68);
+        c[t]--; c[t + 1]--; pushGroup(depth, n > 0 && n < 7 ? 'ryanmen' : 'penchan', t, value);
+        walk(t, sets); groups.pop(); c[t]++; c[t + 1]++;
       }
-      if (t < 27 && n <= 6 && c[t + 2]) use([t, t + 2], { kind: 'kanchan', waits: [t + 1] }, false);
+      if (t < 27 && n <= 6 && c[t + 2]) {
+        const value = (unseen[t] + unseen[t + 2]) * 0.82;
+        c[t]--; c[t + 2]--; pushGroup(depth, 'kanchan', t, value); walk(t, sets); groups.pop(); c[t]++; c[t + 2]++;
+      }
       c[t]--; singles.push(t); walk(t, sets); singles.pop(); c[t]++;
     }
     walk(0, 0);
@@ -270,9 +289,15 @@
         if ((counts[t] === 0 && kinds < 13) || (counts[t] === 1 && !pair)) tiles.push(t);
       }
     } else {
+      // Reuse the three unchanged suit groups: a draw changes exactly one suit,
+      // so only that group is rebuilt before the small combination step.
+      const baseGroups = S.standardGroups(counts);
       const tryTile = (t) => {
         counts[t]++;
-        const s = routeShanten(counts, melds, route);
+        const suit = Math.min(3, Math.floor(t / 9));
+        const groups = baseGroups.slice();
+        groups[suit] = S.groupForSuit(counts, suit);
+        const s = S.combineGroups(groups, melds);
         counts[t]--;
         if (s < base) tiles.push(t);
       };
@@ -495,12 +520,14 @@
   AI.analyzeDiscard = function (rawView, level = 'strong', w = AI.weights, options = {}) {
     AI.assertObservation(rawView);
     const view = normalized(rawView), counts = T.countsFromIds(view.hand), evaluate = evaluator(view, w);
-    const turns = horizon(view), reds = redCount(view), bias = rankBias(view, options.rankBias !== false), candidates = [];
+    const turns = horizon(view), reds = redCount(view), bias = rankBias(view, options.rankBias !== false, options.rankModel), candidates = [];
     const types = [...new Set((view.legalDiscards || view.hand).filter((id) => !(view.forbidden || []).includes(id >> 2)).map((id) => id >> 2))];
     // Fast profile: compute the cheap shanten/ukeire for every discard, then run
     // the full block-shape evaluation only for the best root candidates.
     const fast = options.fast === true || level === 'fast';
-    const rootLimit = Math.max(1, options.rootCandidates || (fast ? 5 : 4));
+    // Twelve roots keeps ~99% top-1 agreement with the full standard search on
+    // random views; lower it with --root-candidates for a coarser, faster pass.
+    const rootLimit = Math.max(1, options.rootCandidates || (fast ? 12 : 4));
     const cheap = new Map();
     if (fast) {
       for (const t of types) {
@@ -574,7 +601,7 @@
   AI.analyzeCall = function (rawView, callOptions, w = AI.weights, options = {}) {
     AI.assertObservation(rawView);
     const opts = callOptions;
-    const view = normalized(rawView), turns = horizon(view), ev = evaluator(view, w), bias = rankBias(view, options.rankBias !== false);
+    const view = normalized(rawView), turns = horizon(view), ev = evaluator(view, w), bias = rankBias(view, options.rankBias !== false, options.rankModel);
     const counts = T.countsFromIds(view.hand), pass = ev(counts, view.unseen, turns, redCount(view));
     const alternatives = [{ action: null, label: '見送り', sh: pass.sh, ukeire: pass.ukeire, expectedNet: round(pass.grossEV), winProbability: pass.winProbability }];
     const actions = [];
@@ -616,6 +643,8 @@
   AI.create = function (seat, opts = {}) {
     const weights = opts.weights ? { ...AI.weights, ...opts.weights } : AI.weights;
     const useRankBias = opts.rankBias !== false;
+    // undefined = use the globally loaded GRP model; null = heuristic rank EV.
+    const useRankModel = opts.rankModel;
     const fast = opts.fast === true || opts.level === 'fast';
     return {
       seat, weights, lastCallAnalysis: null,
@@ -624,8 +653,8 @@
         AI.assertObservation(view);
         if (view.riichi) return { tileId: view.drawnTile, riichi: false, analysis: { version: AI.version, forced: true } };
         const analysis = AI.analyzeDiscard(view, opts.level || 'strong', weights,
-          { rankBias: useRankBias, fast, rootCandidates: opts.rootCandidates }), best = analysis.candidates[0];
-        const margin = weights.pushMargin * rankBias(view, useRankBias);
+          { rankBias: useRankBias, rankModel: useRankModel, fast, rootCandidates: opts.rootCandidates }), best = analysis.candidates[0];
+        const margin = weights.pushMargin * rankBias(view, useRankBias, useRankModel);
         const riichi = view.menzen && best.sh === 0 && !best.furiten && view.score >= 1000 && view.liveRemaining >= 4 && (!view.threat || best.expectedNet > margin);
         return { tileId: best.tileId, riichi, analysis };
       },
@@ -635,7 +664,7 @@
         if (!options || (!options.ron && options.pon == null && options.kan == null && !(options.chi || []).length)) return null;
         if (options.ron) return { type: 'ron' };
         if (view.riichi) return null;
-        this.lastCallAnalysis = AI.analyzeCall(view, options, weights, { rankBias: useRankBias });
+        this.lastCallAnalysis = AI.analyzeCall(view, options, weights, { rankBias: useRankBias, rankModel: useRankModel });
         return this.lastCallAnalysis.selected;
       },
       async wantKan(view, kans) {

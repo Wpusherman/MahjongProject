@@ -97,4 +97,6 @@
 | 12 | `dealer` | 自分が親なら 1 |
 | 13–16 | `seat0` … `seat3` | 自分の席（one-hot） |
 
-ラベルは **最終順位 1–4** です。`node tools/grp-dataset.js` が `{ v, hand, seat, x, rank, finalScore, scoreDelta }` を出力し、`python tools/grp/train_grp.py` が MLP を学習して `grp.json` と `grp.onnx` を書き出します。`grp.json` は `MJ.rank.setRankModel()` で読み込み、`MJ.rank.expectedPoints()` のヒューリスティックな順位点EVを置き換えます。
+ラベルは **最終順位 1–4** です。`node tools/grp-dataset.js` が `{ v, match, hand, handIndex, seat, x, rank, finalScore, scoreDelta }` を出力し、`python tools/grp/train_grp.py` が MLP を学習して `grp.json` と `grp.onnx` を書き出します。`grp.json` は `MJ.rank.setRankModel()` で読み込み、`MJ.rank.expectedPoints()` のヒューリスティックな順位点EVを置き換えます。
+
+`match` 単位で train/val を分割し、局別（東1〜南4）の logloss・top-1・期待順位点MAEと「現在点数順」ベースラインを出力します。`MJ.grp.predictSeats()` は4席の独立な行を24通りの順列確率に射影するため、4×4行列の行の和も列の和も1になります。データ作成・学習・比較の詳細は [grp.md](grp.md) を参照してください。

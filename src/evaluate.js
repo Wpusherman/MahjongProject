@@ -50,6 +50,7 @@
         level: seat === candidateSeat ? candidateLevel : baselineLevel,
         weights: seat === candidateSeat ? candidateWeights : baselineWeights,
         rootCandidates: options.rootCandidates,
+        rankModel: seat === candidateSeat ? options.candidateRankModel : options.baselineRankModel,
         rankBias: seat === candidateSeat ? options.candidateRankBias !== false : options.baselineRankBias !== false
       }));
       const rng = MJ.core.rng(seed);
@@ -69,12 +70,15 @@
       const startHonba = startState ? Number(startState.honba) || 0 : 0;
       const startSticks = startState ? Number(startState.riichiSticks) || 0 : 0;
       let scores = baseScores.slice(), sticks = startSticks;
-      let state = { hand: startHand, dealer: startDealer, honba: startHonba, mode: matchMode || 'tonpu' };
+      // Keep the original match length when using a captured South-3/4 state,
+      // so handsLeft and rank pressure reflect the real remaining hands.
+      const openingMode = matchMode || (startState && startState.mode === 'hanchan' ? 'hanchan' : 'tonpu');
+      let state = { hand: startHand, dealer: startDealer, honba: startHonba, mode: openingMode };
       let calls = 0, riichis = 0, win = false, tsumoWin = false, ronWin = false, dealIn = false, result = null, deals = 0;
       for (let deal = 0; deal < maxDeals; deal++) {
         const game = new MJ.Game({ agents, rng });
         const handResult = await game.playHand({ roundWind: 27 + Math.floor(state.hand / 4), dealer: state.dealer,
-          honba: state.honba, riichiSticks: sticks, scores: scores.slice(), hand: state.hand, mode: matchMode || 'tonpu',
+          honba: state.honba, riichiSticks: sticks, scores: scores.slice(), hand: state.hand, mode: state.mode,
           rankConfig });
         deals++;
         result = handResult;
@@ -165,7 +169,9 @@
   E.power = function (options = {}) {
     const sd = Number(options.sd), effect = Number(options.effect), z = Number(options.z) || 1.96;
     if (!(sd >= 0) || !(effect > 0)) return { effect, seeds: null, games: null, note: 'effect must be positive and sd non-negative' };
-    const seeds = sd === 0 ? 1 : Math.max(1, Math.ceil((z * sd / effect) ** 2));
+    if (sd < 1e-9) return { effect, seeds: null, games: null, observedSd: 0,
+      note: 'zero observed variance (identical policies or a degenerate sample)' };
+    const seeds = Math.max(1, Math.ceil((z * sd / effect) ** 2));
     const seats = Number(options.seatsPerSeed) > 0 ? Number(options.seatsPerSeed) : 1;
     return { effect, seeds, games: seeds * seats, alpha: Number(options.alpha) || 0.05, z,
       observedSd: sd, seatsPerSeed: seats };
@@ -185,7 +191,8 @@
     if (extra.control) lines.push(`control seed-cluster ${extra.control.seedClusterRankPoints.mean.toFixed(2)}`);
     if (extra.delta) lines.push(`paired delta ${extra.delta.mean.toFixed(2)} (95% CI [${(extra.delta.mean - extra.delta.ci95).toFixed(2)}, ${(extra.delta.mean + extra.delta.ci95).toFixed(2)}], seeds ${extra.delta.n})`);
     if (extra.power) for (const p of extra.power) {
-      lines.push(`power: effect ${p.effect.toFixed(2)} needs ${p.seeds} seeds / ${p.games} games (cluster sd ${p.observedSd.toFixed(2)})`);
+      if (p.seeds == null) lines.push(`power: effect ${p.effect.toFixed(2)} unavailable — ${p.note}`);
+      else lines.push(`power: effect ${p.effect.toFixed(2)} needs ${p.seeds} seeds / ${p.games} games (cluster sd ${p.observedSd.toFixed(2)})`);
     }
     if (extra.gamesPerSecond != null) lines.push(`throughput ${extra.gamesPerSecond.toFixed(1)} games/s (${(extra.elapsedMs / 1000).toFixed(1)} s)`);
     return lines.join('\n');

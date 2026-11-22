@@ -42,7 +42,7 @@ function expand(files) {
   for (const file of files) {
     if (!fs.existsSync(file)) throw new Error('not found: ' + file);
     if (fs.statSync(file).isDirectory()) {
-      for (const name of fs.readdirSync(file)) if (/\.mjlog(\.gz)?$/.test(name)) out.push(path.join(file, name));
+      for (const name of fs.readdirSync(file)) if (/\.(mjlog(\.gz)?|json)$/.test(name)) out.push(path.join(file, name));
     } else out.push(file);
   }
   return out;
@@ -61,6 +61,29 @@ try {
   const rows = [];
   let files = 0, rounds = 0, skipped = 0;
   for (const file of expand(args.files)) {
+    // A finished 翠卓 record also carries each hand's starting scores/dealer.
+    if (/\.json$/i.test(file) && !/\.jsonl$/i.test(file)) {
+      let record;
+      try { record = JSON.parse(readText(file)); } catch (error) {
+        console.warn('skip', file, '-', error.message);
+        skipped++;
+        continue;
+      }
+      if (record.redacted) { skipped++; continue; }
+      const mode = record.mode === 'hanchan' ? 'hanchan' : 'tonpu';
+      (record.hands || []).forEach((hand, index) => {
+        const config = hand.config || {};
+        const handIndex = Number.isInteger(config.hand) ? config.hand : index;
+        if (!args.all && !keep.has(handIndex)) return;
+        if (!Array.isArray(config.scores) || config.scores.length !== 4) { skipped++; return; }
+        rows.push({ scores: config.scores.map(Number), dealer: config.dealer | 0, honba: config.honba || 0,
+          riichiSticks: config.riichiSticks || 0, handIndex, roundWind: 27 + Math.floor(handIndex / 4),
+          kyoku: handIndex % 4 + 1, mode, source: path.basename(file) });
+        rounds++;
+      });
+      files++;
+      continue;
+    }
     let events;
     try { events = M.fromTenhou(readText(file)); } catch (error) {
       console.warn('skip', file, '-', error.message);
@@ -99,7 +122,7 @@ try {
   };
   const metaFile = args.meta || args.out + '.meta.json';
   fs.writeFileSync(metaFile, JSON.stringify(meta, null, 2) + '\n');
-  console.log(`wrote ${rows.length} start states from ${files} mjlog files -> ${args.out}`);
+  console.log(`wrote ${rows.length} start states from ${files} files -> ${args.out}`);
   console.log(`metadata -> ${metaFile}`);
 } catch (error) {
   console.error('start-states failed:', error.message);

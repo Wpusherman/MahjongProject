@@ -53,7 +53,7 @@ const MJ = globalThis.MJ, E = MJ.evaluate;
   assert.equal(p1.seeds, Math.ceil((1.96 * 2 / 0.2) ** 2));
   assert.equal(p2.seeds, Math.ceil((1.96 * 4 / 0.2) ** 2));
   assert.equal(p1.games, p1.seeds * 4);
-  assert.equal(E.power({ sd: 0, effect: 0.2 }).seeds, 1);
+  assert.equal(E.power({ sd: 0, effect: 0.2 }).seeds, null);
   assert.equal(E.power({ sd: 2, effect: 0 }).seeds, null);
 
   // Synthetic rows: deterministic CI and rate calculations.

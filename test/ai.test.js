@@ -78,5 +78,26 @@ function view(text, extra = {}) {
   const heavy = await MJ.ai.create(1, { weights: { ...MJ.ai.weights, shapeGain: 10 } }).chooseDiscard(view('1589m38p36s113356z'));
   assert(Math.abs(heavy.analysis.candidates[0].shape) >= Math.abs(base.analysis.candidates[0].shape), 'shapeGain is read from per-agent weights');
   assert.equal(JSON.stringify(MJ.ai.weights), defaults, 'per-agent weights leave the global defaults untouched');
-  console.log('AI strategy regressions OK: honors, growth, suji, tanki risk, call comparison, dead waits, immutability, route, weights');
+  // The cached improving-tile list must equal a full 34-tile scan on every route.
+  let seed = 4242;
+  const rnd = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; };
+  const shantenOf = (route, counts, melds) => route === 'standard' ? MJ.shanten.standard(counts, melds)
+    : route === 'chiitoi' ? MJ.shanten.chiitoi(counts) : MJ.shanten.kokushi(counts);
+  for (let i = 0; i < 500; i++) {
+    const counts = new Array(34).fill(0);
+    let left = 13;
+    while (left > 0) { const t = Math.floor(rnd() * 34); if (counts[t] < 4) { counts[t]++; left--; } }
+    const melds = Math.floor(rnd() * 4);
+    for (const route of ['standard', 'chiitoi', 'kokushi']) {
+      const base = shantenOf(route, counts, melds), exact = [];
+      for (let t = 0; t < 34; t++) {
+        if (counts[t] >= 4) continue;
+        counts[t]++;
+        if (shantenOf(route, counts, melds) < base) exact.push(t);
+        counts[t]--;
+      }
+      assert.deepEqual(MJ.ai.improvingTiles(counts, melds, route), exact, `improving tiles ${route} #${i}`);
+    }
+  }
+  console.log('AI strategy regressions OK: honors, growth, suji, tanki risk, call comparison, dead waits, immutability, route, ukeire tiles, weights');
 })().catch((e) => { console.error(e); process.exit(1); });

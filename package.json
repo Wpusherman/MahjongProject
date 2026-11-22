@@ -18,7 +18,10 @@
     "grp:train": "python tools/grp/train_grp.py",
     "parquet": "python tools/to_parquet.py",
     "mjai:smoke": "node tools/mjai-smoke.js",
-    "grp:selfplay": "node tools/grp-selfplay.js"
+    "grp:selfplay": "node tools/grp-selfplay.js",
+    "pipeline": "node tools/tenhou-pipeline.js",
+    "divergence": "node tools/divergence.js",
+    "shanten:golden": "node tools/shanten-golden.js"
   },
   "devDependencies": {
     "@playwright/test": "^1.64.0"

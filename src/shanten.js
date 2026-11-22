@@ -57,33 +57,33 @@
     return options;
   }
 
-  function pruneStates(states) {
-    const out = [];
-    for (const a of states) {
-      if (!states.some((b) => b !== a && b[0] >= a[0] && b[1] >= a[1] && b[2] >= a[2] &&
-        (b[0] > a[0] || b[1] > a[1] || b[2] > a[2]))) out.push(a);
-    }
-    return out;
-  }
-
-  function standardTable(counts, openSets) {
-    const groups = [
-      groupOptions(counts.slice(0, 9), true),
-      groupOptions(counts.slice(9, 18), true),
-      groupOptions(counts.slice(18, 27), true),
-      groupOptions(counts.slice(27, 34), false)
-    ];
+  // State index = melds * 10 + taatsu * 2 + pair (50 possible states). A pair
+  // of reusable boolean bitmaps replaces per-call arrays and pruning.
+  const STATE_A = new Uint8Array(50), STATE_B = new Uint8Array(50);
+  S.groupForSuit = (counts, suit) => suit === 3
+    ? groupOptions(counts.slice(27, 34), false)
+    : groupOptions(counts.slice(suit * 9, suit * 9 + 9), true);
+  S.standardGroups = (counts) => [0, 1, 2, 3].map((suit) => S.groupForSuit(counts, suit));
+  function combineGroups(groups, openSets) {
     const meldCap = Math.max(0, 4 - openSets);
-    let states = [[0, 0, 0]];
+    STATE_A.fill(0); STATE_A[0] = 1;
+    let source = STATE_A, target = STATE_B;
     for (const options of groups) {
-      const next = [];
-      for (const [m, t, p] of states) for (const o of options) {
-        next.push([Math.min(meldCap, m + o.m), Math.min(4, t + o.t), p | o.p]);
+      target.fill(0);
+      for (let idx = 0; idx < 50; idx++) {
+        if (!source[idx]) continue;
+        const m = Math.floor(idx / 10), t = Math.floor((idx % 10) / 2), p = idx & 1;
+        for (const o of options) {
+          const m2 = Math.min(meldCap, m + o.m), t2 = Math.min(4, t + o.t);
+          target[m2 * 10 + t2 * 2 + (p | o.p)] = 1;
+        }
       }
-      states = pruneStates(next);
+      const swap = source; source = target; target = swap;
     }
     let min = 99;
-    for (const [m, t, p] of states) {
+    for (let idx = 0; idx < 50; idx++) {
+      if (!source[idx]) continue;
+      const m = Math.floor(idx / 10), t = Math.floor((idx % 10) / 2), p = idx & 1;
       const sets = m + openSets;
       if (sets > 4) continue;
       const value = 8 - 2 * sets - Math.min(t, 4 - sets) - p;
@@ -91,6 +91,7 @@
     }
     return min;
   }
+  S.combineGroups = combineGroups;
 
   const standardCache = new Map();
   S.standard = function (counts, openSets) {
@@ -98,7 +99,7 @@
     const key = openSets + ':' + counts.join('');
     let value = standardCache.get(key);
     if (value === undefined) {
-      value = standardTable(counts, openSets);
+      value = combineGroups(S.standardGroups(counts), openSets);
       insert(standardCache, key, value, 200000);
     }
     return value;

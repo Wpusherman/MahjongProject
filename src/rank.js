@@ -62,12 +62,13 @@
     const handsLeft = Math.max(1, opts.handsLeft == null ? 4 : opts.handsLeft);
     const scale = Math.max(1, opts.scale == null ? 4000 + 2500 * handsLeft : opts.scale);
     const target = scores[seat] + (Number(delta) || 0);
-    if (R.GRP.model) {
+    const model = opts.model !== undefined ? opts.model : R.GRP.model;
+    if (model) {
       const after = scores.slice();
       after[seat] = target;
       // Joint 4x4 prediction with row and column sums of 1, so the four seats
       // are guaranteed to occupy one rank each in expectation.
-      const matrix = MJ.grp.predictSeats(R.GRP.model, { scores: after, handsLeft, honba: opts.honba,
+      const matrix = MJ.grp.predictSeats(model, { scores: after, handsLeft, honba: opts.honba,
         riichiSticks: opts.riichiSticks, handIndex: opts.handIndex, dealer: opts.dealer });
       const probabilities = matrix[seat];
       const okaValue = Math.max(0, (c.returnScore - c.startScore) * 4 / c.scoreUnit);

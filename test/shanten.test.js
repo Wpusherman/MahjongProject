@@ -54,5 +54,20 @@ const hand = C({ m: [1, 2, 3, 4, 5, 6, 7, 8, 9], p: [1, 2], s: [1, 1] });
 const uk = S.ukeire(hand, 0, null);
 eq(uk.tiles.length >= 1, true, 'ukeire has tiles');
 
+// The suit-table implementation must agree with the original DFS on random
+// hands, including open melds and all counts 0..4.
+let seed = 20261122;
+const rnd = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; };
+for (let i = 0; i < 6000; i++) {
+  const counts = new Array(34).fill(0);
+  let left = Math.floor(rnd() * 15);
+  while (left > 0) {
+    const t = Math.floor(rnd() * 34);
+    if (counts[t] < 4) { counts[t]++; left--; }
+  }
+  const open = Math.floor(rnd() * 5);
+  eq(S.standard(counts, open), S.standardReference(counts, open), `table vs DFS #${i} open=${open} ${counts.join('')}`);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
