@@ -18,6 +18,7 @@ for (const row of rows) {
   assert.equal(row.x.length, G.FEATURES.length);
   assert(row.x.every(Number.isFinite));
   assert(row.rank >= 1 && row.rank <= 4);
+  assert(!G.FEATURES.some((name) => /final|rank|result/i.test(name)), 'features never contain the label or final score');
   assert.equal(row.match, 'match', 'a dataset can be grouped by match');
   assert(Number.isInteger(row.handIndex));
 }
