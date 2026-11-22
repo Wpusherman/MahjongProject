@@ -5,13 +5,21 @@
   const WINDS = ['東', '南', '西', '北'];
   const escape = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const ui = MJ.ui = { humanSeat: 0, mode: null, running: false, fast: false, token: 0,
-    record: null, review: null, pending: null, discardResolve: null, riichiWanted: false, level: 'strong', aiWeights: null, rankConfig: 'tenhou' };
+    record: null, review: null, pending: null, discardResolve: null, riichiWanted: false, level: 'strong', aiWeights: null, grpModel: null, rankConfig: 'tenhou' };
   // The raw game object stays in this closure. It is exposed only to automated tests,
   // never as a normal console-accessible property in the built page.
   let currentGame = null;
   Object.defineProperty(ui, 'game', {
     get() { return globalThis.__SUITAKU_DEBUG__ === true ? currentGame : null; },
     set(value) { currentGame = value; }, configurable: true
+  });
+  // The complete record lives in this closure. While a match is running the
+  // public `ui.record` property is a masked copy, so even the developer console
+  // cannot read the current wall or the other seats' hands before the match ends.
+  let liveRecord = null;
+  Object.defineProperty(ui, 'record', {
+    get() { return liveRecord && !liveRecord.finished ? MJ.record.redact(liveRecord, { seat: ui.humanSeat }) : liveRecord; },
+    set(value) { liveRecord = value; }, configurable: true
   });
   const button = (label, action, cls) => { const b = document.createElement('button'); b.textContent = label; b.onclick = action; if (cls) b.className = cls; return b; };
   function toast(message) {
@@ -174,7 +182,7 @@
       const id = obs.doraIndicators[i];
       di.appendChild(tileEl(id == null ? 0 : id >> 2, { small: true, back: id == null, red: id != null && T.isRed(id) }));
     }
-    $('center').innerHTML = `<span class="center-tag">${ui.review ? 'REPLAY' : ui.record && ui.record.mode === 'hanchan' ? 'HANCHAN' : 'TONPU'}</span><div class="center-round">${WINDS[obs.roundWind - 27]} ${obs.dealer + 1} 局</div><div class="center-remaining">${obs.liveRemaining}<small>枚</small></div><div class="info-line"><span>${obs.honba} 本場</span><span>供託 ${obs.riichiSticks}</span></div>`;
+    $('center').innerHTML = `<span class="center-tag">${ui.review ? 'REPLAY' : liveRecord && liveRecord.mode === 'hanchan' ? 'HANCHAN' : 'TONPU'}</span><div class="center-round">${WINDS[obs.roundWind - 27]} ${obs.dealer + 1} 局</div><div class="center-remaining">${obs.liveRemaining}<small>枚</small></div><div class="info-line"><span>${obs.honba} 本場</span><span>供託 ${obs.riichiSticks}</span></div>`;
     for (let s = 0; s < 4; s++) { renderSeat(s, obs, game); renderRiver(s, obs); }
     guide(obs, game); animateDiscard(obs);
   }
@@ -227,7 +235,7 @@
         if (view.riichi) {
           ui.mode = 'auto-discard'; ui.discardResolve = null;
           $('controls').innerHTML = '<span class="hint">リーチ中 — 自動ツモ切り</span>';
-          await new Promise((resolve) => setTimeout(resolve, ui.fast ? 0 : 420));
+          await new Promise((resolve) => setTimeout(resolve, MJ.pacing.autoDiscardDelay(ui.fast)));
           if (token === ui.token) ui.mode = null;
           return { tileId: view.drawnTile, riichi: false, analysis: { forced: true, automatic: true } };
         }
@@ -237,6 +245,7 @@
         });
       },
       async wantCall(view, opts) {
+        if (!opts || (!opts.ron && opts.pon == null && opts.kan == null && !(opts.chi || []).length)) return null;
         this.lastCallAnalysis = !opts.ron && !view.riichi ? MJ.ai.analyzeCall(view, opts) : null;
         const choices = [];
         if (opts.ron) choices.push({ label: 'ロン', value: { type: 'ron' }, primary: true });
@@ -255,9 +264,14 @@
   function pacedAI(seat, token) {
     const ai = MJ.ai.create(seat, { level: ui.level, weights: ui.aiWeights || undefined }), out = {};
     for (const fn of ['wantTsumo', 'chooseDiscard', 'wantCall', 'wantKan']) out[fn] = async (...args) => {
-      await new Promise((r) => setTimeout(r, ui.fast ? 0 : fn === 'chooseDiscard' ? 400 : 100));
+      const started = Date.now(), budget = MJ.pacing.agentBudget(ui.fast, fn);
+      await new Promise((r) => setTimeout(r, MJ.pacing.agentDelay(ui.fast, fn)));
       if (token !== ui.token) return fn === 'chooseDiscard' ? { tileId: args[0].hand[0] } : null;
       const result = await ai[fn](...args);
+      // Pad to a fixed budget so a legal call cannot be inferred from how long
+      // the analysis happened to take.
+      const elapsed = Date.now() - started;
+      if (elapsed < budget) await new Promise((r) => setTimeout(r, budget - elapsed));
       if (fn === 'wantCall') out.lastCallAnalysis = ai.lastCallAnalysis;
       return result;
     };
@@ -297,6 +311,14 @@
     weightsRow.appendChild(button(ui.aiWeights ? 'AIの重みを差し替え' : '学習済みのAI重みを読み込む（任意）', () => $('weights-file').click(), 'text-button'));
     if (ui.aiWeights) weightsRow.appendChild(document.createTextNode(' 学習済みの重みを使用中'));
     p.appendChild(weightsRow);
+    const grpRow = document.createElement('p'); grpRow.className = 'muted';
+    if (ui.grpModel) {
+      grpRow.appendChild(document.createTextNode(`順位分布モデル使用中（${ui.grpModel.layers ? ui.grpModel.layers.length + '層' : 'GRP'}） `));
+      grpRow.appendChild(button('解除', () => { MJ.rank.clearRankModel(); ui.grpModel = null; lobby(); }, 'text-button'));
+    } else {
+      grpRow.appendChild(button('順位分布モデル（GRP）を読み込む（任意）', () => $('grp-file').click(), 'text-button'));
+    }
+    p.appendChild(grpRow);
     const note = document.createElement('p'); note.textContent = '25,000点持ち / 赤5各1枚 / 頭ハネ / 親テンパイ連荘。ツモ牌は各プレイヤーから見て左端に置きます。'; p.appendChild(note);
     actions(p, [{ label: '牌譜を読み込む（JSON / mjai / 天鳳）', action: () => $('replay-file').click() }, { label: '対局をはじめる →', primary: true, action: () => { MJ.audio.unlock(); ui.level = select.value; closePanel(); startMatch(mode); } }]);
   }
@@ -309,26 +331,38 @@
     const url = URL.createObjectURL(new Blob([text], { type })), a = document.createElement('a');
     a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 2000);
   }
+  function recordForStorage() {
+    // Until the match is over, the wall and the other seats' private information
+    // never leave memory: storage and downloads receive a masked copy only.
+    if (!liveRecord) return null;
+    return liveRecord.finished ? liveRecord : MJ.record.redact(liveRecord, { seat: ui.humanSeat });
+  }
   function exportRecord() {
-    if (!ui.record || !ui.record.hands.length) { toast('対局開始後に牌譜を保存できます'); return; }
-    const p = panel('<div class="eyebrow">EXPORT GAME RECORD</div><h2>牌譜を保存</h2><p>AIの打牌を検討するときは、JSON牌譜と局番号・イベント番号をお知らせください。対局途中でも保存できます。</p>');
-    const name = 'suitaku-' + ui.record.createdAt.replace(/[:.]/g, '-');
-    const save = (json) => { download(name + (json ? '.json' : '.txt'), json ? JSON.stringify(ui.record, null, 2) : MJ.record.text(ui.record), json ? 'application/json' : 'text/plain'); };
-    actions(p, [{ label: 'JSON（再生・検討用）', primary: true, action: () => save(true) }, { label: 'テキスト', action: () => save(false) }]);
+    if (!liveRecord || !liveRecord.hands.length) { toast('対局開始後に牌譜を保存できます'); return; }
+    const masked = !liveRecord.finished;
+    const p = panel('<div class="eyebrow">EXPORT GAME RECORD</div><h2>牌譜を保存</h2><p>AIの打牌を検討するときは、JSON牌譜と局番号・イベント番号をお知らせください。対局途中でも保存できます。</p>' +
+      (masked ? '<p class="muted">対局中の牌譜はマスクされます。牌山・他家の配牌/ツモ・鳴き候補・他家AIの解析は含まれず、終局後に保存するとすべて公開されます。</p>' : ''));
+    const name = 'suitaku-' + liveRecord.createdAt.replace(/[:.]/g, '-');
+    const data = recordForStorage();
+    const save = (json) => { download(name + (json ? '.json' : '.txt'), json ? JSON.stringify(data, null, 2) : MJ.record.text(data), json ? 'application/json' : 'text/plain'); };
+    actions(p, [{ label: masked ? 'JSON（マスク済み・報告用）' : 'JSON（再生・検討用）', primary: true, action: () => save(true) }, { label: 'テキスト', action: () => save(false) }]);
     actions(p, [{ label: '閉じる', action: () => { closePanel(); if (ui.waitingResult) showResultPanel(currentGame, currentGame.result); else if (!ui.running && !ui.review) lobby(); } }]);
   }
   function annotate() {
     if (!ui.record || !currentGame || !currentGame.lastDiscard) { toast('打牌後にメモを残せます'); return; }
-    const d = currentGame.lastDiscard, hand = ui.review ? ui.review.hand : ui.record.hands.length - 1;
+    const d = currentGame.lastDiscard, hand = ui.review ? ui.review.hand : liveRecord.hands.length - 1;
     const p = panel(`<div class="eyebrow">REVIEW NOTE</div><h2>打牌に検討メモ</h2><p>局 #${hand + 1} / イベント #${d.eventIndex} / ${NAMES[d.seat]} ${T.label(d.tileId >> 2)}</p>`);
     const input = document.createElement('textarea'); input.rows = 5; input.placeholder = '例：ここはドラを残して、現物の東を切るほうがよいのでは？'; p.appendChild(input);
     actions(p, [{ label: '戻る', action: closePanel }, { label: '牌譜に記録', primary: true, action: () => {
-      if (input.value.trim()) { ui.record.annotations = ui.record.annotations || []; ui.record.annotations.push({ hand, eventIndex: d.eventIndex, text: input.value.trim() }); autosave(); }
+      if (input.value.trim()) { liveRecord.annotations = liveRecord.annotations || []; liveRecord.annotations.push({ hand, eventIndex: d.eventIndex, text: input.value.trim() }); autosave(); }
       closePanel(); toast('メモを牌譜に記録しました');
     } }]); input.focus();
   }
   function autosave() {
-    try { localStorage.setItem('suitaku-last-record', JSON.stringify(ui.record)); } catch (_) { /* Export remains available if storage is full or unavailable. */ }
+    try {
+      const data = recordForStorage();
+      if (data) localStorage.setItem('suitaku-last-record', JSON.stringify(data));
+    } catch (_) { /* Export remains available if storage is full or unavailable. */ }
   }
   function resultHtml(game, res) {
     if (res.type === 'draw') {
@@ -361,11 +395,14 @@
     try {
       while (!state.ended && token === ui.token) {
         const game = new MJ.Game({ agents: [humanAgent(token), pacedAI(1, token), pacedAI(2, token), pacedAI(3, token)],
+          // Every seat gets the same fixed check delay, whether or not it had a
+          // legal call, so the pause does not disclose hidden call options.
+          onCheck: () => new Promise((resolve) => setTimeout(resolve, MJ.pacing.checkDelay(ui.fast))),
           onUpdate: () => { if (token === ui.token) render(game); }, onEvent: (msg, data) => { if (token === ui.token) { appendLog(msg, data); if (data?.type) MJ.audio.play(data.type); } } });
         currentGame = game; ui.animationKey = null; ui.waitingResult = false;
         appendLog(`── ${state.hand < 4 ? '東' : '南'}${state.dealer + 1}局 ${state.honba}本場 ──`);
-        const playing = game.playHand({ roundWind: 27 + Math.floor(state.hand / 4), dealer: state.dealer, honba: state.honba, riichiSticks: sticks, scores: scores.slice(), hand: state.hand, mode: state.mode });
-        ui.record.hands.push(game.recording);
+        const playing = game.playHand({ roundWind: 27 + Math.floor(state.hand / 4), dealer: state.dealer, honba: state.honba, riichiSticks: sticks, scores: scores.slice(), hand: state.hand, mode: state.mode, rankConfig: ui.rankConfig });
+        liveRecord.hands.push(game.recording);
         const res = await playing;
         if (token !== ui.token || !res) return;
         scores = game.players.map((p) => p.score); sticks = game.riichiSticks;
@@ -378,10 +415,10 @@
       const ranked = scores.map((score, seat) => ({ score, seat })).sort((a, b) => b.score - a.score || a.seat - b.seat);
       if (sticks) { scores[ranked[0].seat] += sticks * 1000; ranked[0].score += sticks * 1000; }
       const settled = MJ.rank.finalResult(scores, ui.rankConfig);
-      ui.record.finalScores = scores; ui.record.finalRankPoints = settled.points;
-      ui.record.rankConfig = { name: settled.config.name, uma: settled.config.uma, startScore: settled.config.startScore,
+      liveRecord.finalScores = scores; liveRecord.finalRankPoints = settled.points;
+      liveRecord.rankConfig = { name: settled.config.name, uma: settled.config.uma, startScore: settled.config.startScore,
         returnScore: settled.config.returnScore, scoreUnit: settled.config.scoreUnit, scoreWeight: settled.config.scoreWeight };
-      ui.record.finished = true; autosave(); ui.running = false;
+      liveRecord.finished = true; autosave(); ui.running = false;
       const rows = settled.order.map((seat, i) => `<div class="ranking-row"><span>${i + 1}位　${NAMES[seat]}</span><strong>${scores[seat].toLocaleString()} 点 <small>${settled.points[seat] >= 0 ? '+' : ''}${settled.points[seat]} pt</small></strong></div>`).join('');
       const p = panel('<div class="eyebrow">MATCH COMPLETE</div><h2>終局</h2>' + rows + `<p class="muted">順位点：${settled.config.name} / ウマ ${settled.config.uma.join('・')}</p>`);
       actions(p, [{ label: '牌譜を保存', action: exportRecord }, { label: '牌譜を検討', action: () => startReview(ui.record) }, { label: '新しい対局', primary: true, action: lobby }]);
@@ -394,6 +431,7 @@
     }
   }
   function startReview(data) {
+    if (MJ.record.isRedacted(data)) throw new Error('対局中の牌譜はマスクされています。終局後に保存した牌譜を読み込んでください。');
     MJ.record.validate(data); stop(); ui.record = data;
     ui.review = { hand: 0, position: 0, reveal: false, analyses: new Map() }; closePanel();
     $('match-label').textContent = '牌譜検討 / REPLAY'; $('controls').innerHTML = '<span class="hint">盤面の左半分で戻る・右半分で進む（← → キーも対応）</span>';
@@ -555,6 +593,16 @@
       } catch (err) { toast('読み込みできませんでした：' + err.message); }
       finally { e.target.value = ''; }
     };
+    $('grp-file').onchange = async (e) => {
+      const file = e.target.files[0]; if (!file) return;
+      try {
+        const model = JSON.parse(await file.text());
+        MJ.rank.setRankModel(model);
+        ui.grpModel = model;
+        toast(`GRPモデルを読み込みました（${model.layers.length}層 / ${model.features.length}特徴）`);
+        lobby();
+      } catch (err) { toast(err.message); } finally { e.target.value = ''; }
+    };
     $('weights-file').onchange = async (e) => {
       const file = e.target.files[0]; if (!file) return;
       try {
@@ -573,8 +621,13 @@
     try {
       const last = localStorage.getItem('suitaku-last-record');
       if (last) {
-        const p = $('overlay').firstChild;
-        actions(p, [{ label: '前回の牌譜を検討', action: () => { try { startReview(JSON.parse(last)); } catch (e) { toast(e.message); } } }]);
+        let previous = null;
+        try { previous = JSON.parse(last); } catch (_) {}
+        // A masked record cannot be replayed; only finished matches are offered.
+        if (previous && !MJ.record.isRedacted(previous)) {
+          const p = $('overlay').firstChild;
+          actions(p, [{ label: '前回の牌譜を検討', action: () => { try { startReview(previous); } catch (e) { toast(e.message); } } }]);
+        }
       }
     } catch (_) {}
   });

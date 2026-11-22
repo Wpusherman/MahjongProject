@@ -27,6 +27,10 @@
   function Game(config) {
     this.onEvent = config.onEvent || (() => {});
     this.onUpdate = config.onUpdate || (() => {});
+    // Optional pacing hook. It runs once for every seat that is asked about a
+    // discard, including seats with no call options, so the delay cannot reveal
+    // whether an opponent could pon/ron.
+    this.onCheck = config.onCheck || null;
     this.agents = config.agents;
     this.rng = config.rng || Math.random;
     this.logs = [];
@@ -45,7 +49,8 @@
     Object.assign(this, { roundWind: config.roundWind, dealer: config.dealer, honba: config.honba || 0,
       riichiSticks: config.riichiSticks || 0, turnCount: 0, anyCall: false, ended: false, result: null,
       wallIndex: 0, liveEnd: 122, rinshanIndex: 0, doraRevealed: 1, currentSeat: config.dealer,
-      handIndex: config.hand != null ? config.hand : 0, mode: config.mode || 'tonpu' });
+      handIndex: config.hand != null ? config.hand : 0, mode: config.mode || 'tonpu',
+      rankConfig: config.rankConfig });
     this.handsLeft = Math.max(1, (this.mode === 'hanchan' ? 8 : 4) - this.handIndex);
     this.players = Array.from({ length: 4 }, (_, seat) => ({ seat, hand: [], melds: [], discards: [], river: [],
       discardHistory: [], score: config.scores[seat], riichi: false, doubleRiichi: false, ippatsu: false,
@@ -111,7 +116,7 @@
       scores: this.players.map((x) => x.score), seatWinds: this.players.map((_, s) => this.seatWindOf(s)),
       roundWind: this.roundWind, seatWind: this.seatWindOf(seat),
       dealer: this.dealer, honba: this.honba, riichiSticks: this.riichiSticks,
-      handIndex: this.handIndex, mode: this.mode, handsLeft: this.handsLeft,
+      handIndex: this.handIndex, mode: this.mode, handsLeft: this.handsLeft, rankConfig: this.rankConfig,
       isDealer: seat === this.dealer, riichi: p.riichi, menzen: !p.melds.some((m) => m.open),
       liveRemaining: this.liveRemaining(), unseen: this.computeUnseen(seat), opponents,
       threat: opponents.some((o) => o.riichi), score: p.score, turnCount: this.turnCount,
@@ -308,11 +313,15 @@
     const claims = [];
     for (let dist = 1; dist < 4; dist++) {
       const seat = (from + dist) % 4, opts = this.callOptions(seat, from, tileId, robKan);
-      if (!opts) continue;
+      if (this.onCheck) await this.onCheck({ seat, from, tileId, robKan: robKan || null, options: opts });
+      if (this.cancelled) return null;
       const agent = this.agents[seat];
       agent.lastCallAnalysis = null;
+      // Every seat goes through the same agent call, even with no legal call.
+      // The UI paces the agent itself, so the delay does not disclose options.
       const action = await agent.wantCall(this.getObservation(seat, { callTile: tileId, callType: tileId >> 2, callFrom: from, isCallDecision: true }), opts);
       if (this.cancelled) return null;
+      if (!opts) continue;
       this.record('response', { seat, from, tileId, robKan: robKan || null, action, options: opts, analysis: agent.lastCallAnalysis });
       if (opts.ron && (!action || action.type !== 'ron')) {
         this.players[seat].tempFuriten = true;

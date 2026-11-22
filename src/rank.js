@@ -13,6 +13,15 @@
     raw: { name: '素点のみ', uma: [0, 0, 0, 0], startScore: 25000, returnScore: 25000, scoreUnit: 1000, scoreWeight: 1 }
   };
   R.default = 'tenhou';
+  // Optional learned Game Result Prediction model (src/grp.js). When set it
+  // replaces the heuristic logistic rank EV with P(final rank | standings).
+  R.GRP = { model: null };
+  R.setRankModel = function (model) {
+    if (!MJ.grp) throw new Error('MJ.grp is not loaded');
+    R.GRP.model = MJ.grp.validateModel(model);
+    return R.GRP.model;
+  };
+  R.clearRankModel = function () { R.GRP.model = null; };
   R.setDefault = function (name) { R.resolve(name); R.default = name; };
   R.resolve = function (config) {
     const source = config == null ? R.default : config;
@@ -53,6 +62,25 @@
     const handsLeft = Math.max(1, opts.handsLeft == null ? 4 : opts.handsLeft);
     const scale = Math.max(1, opts.scale == null ? 4000 + 2500 * handsLeft : opts.scale);
     const target = scores[seat] + (Number(delta) || 0);
+    if (R.GRP.model) {
+      const after = scores.slice();
+      after[seat] = target;
+      // Joint 4x4 prediction with row and column sums of 1, so the four seats
+      // are guaranteed to occupy one rank each in expectation.
+      const matrix = MJ.grp.predictSeats(R.GRP.model, { scores: after, handsLeft, honba: opts.honba,
+        riichiSticks: opts.riichiSticks, handIndex: opts.handIndex, dealer: opts.dealer });
+      const probabilities = matrix[seat];
+      const okaValue = Math.max(0, (c.returnScore - c.startScore) * 4 / c.scoreUnit);
+      let uma = 0, oka = 0, expectedRank = 1;
+      for (let i = 0; i < 4; i++) {
+        uma += probabilities[i] * (c.uma[i] || 0);
+        if (i === 0) oka += probabilities[i] * okaValue;
+        expectedRank += i * probabilities[i];
+      }
+      const raw = (target - c.startScore) / c.scoreUnit * c.scoreWeight;
+      return { rank: round(expectedRank), points: round(uma + oka + raw), uma: round(uma), oka: round(oka),
+        raw: round(raw), probabilities: probabilities.slice() };
+    }
     let below = 0;
     for (let other = 0; other < 4; other++) {
       if (other === seat) continue;

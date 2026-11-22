@@ -1,6 +1,21 @@
 (function () {
   const MJ = globalThis.MJ;
   const copy = (x) => JSON.parse(JSON.stringify(x));
+  const T = MJ.tiles;
+  const nonRedCopy = (type) => {
+    for (let copyIndex = 0; copyIndex < 4; copyIndex++) if (!T.isRed(type * 4 + copyIndex)) return type * 4 + copyIndex;
+    return type * 4;
+  };
+  // Reveal only what every player can see. A concealed kan exposes its tile type
+  // but not which physical copy (and therefore not the red-five flag) is face down.
+  const publicMeld = (m) => {
+    const out = Object.assign({}, m, { tiles: (m.tiles || []).slice() });
+    if (!m.open && m.kind === 'kan') {
+      out.tiles = out.tiles.map((id, i) => (i === 0 || i === out.tiles.length - 1) && T.isRed(id) ? nonRedCopy(id >> 2) : id);
+      out.concealed = true;
+    }
+    return out;
+  };
   const R = MJ.record = {
     create(mode, level) {
       return { format: 'suitaku-riichi', version: 1, createdAt: new Date().toISOString(), mode, ai: level,
@@ -8,8 +23,57 @@
           dealerTenpaiRepeat: true, agariYame: false, extension: false, kuikae: false,
           nineTerminals: false, nagashiMangan: false }, hands: [], annotations: [] };
     },
+    // A record that is still being played. The wall, the other seats' initial
+    // hands, their draws and their call options are removed before anything is
+    // written to localStorage or downloaded.
+    redact(data, opts = {}) {
+      if (!data || !Array.isArray(data.hands)) throw new Error('翠卓のJSON牌譜が必要です。');
+      const seat = Number.isInteger(opts.seat) && opts.seat >= 0 && opts.seat < 4 ? opts.seat : 0;
+      const view = copy(data);
+      view.redacted = true;
+      view.revealSeat = seat;
+      view.hands = view.hands.map((hand) => {
+        const out = Object.assign({}, hand);
+        delete out.wall;
+        delete out.initialHands;
+        out.events = (hand.events || []).flatMap((event) => {
+          // Passing or considering a call is not public information.
+          if (event.type === 'response' && event.seat !== seat) return [];
+          if (event.type === 'draw') {
+            if (event.seat === seat) return [event];
+            return [{ index: event.index, turn: event.turn, type: 'draw', seat: event.seat,
+              rinshan: !!event.rinshan, hidden: true }];
+          }
+          if (event.type === 'discard') {
+            const kept = Object.assign({}, event);
+            // AI candidate lists are derived from that seat's private hand.
+            if (kept.seat !== seat) delete kept.analysis;
+            return [kept];
+          }
+          if (event.type === 'kan') return [Object.assign({}, event, { melds: (event.melds || []).map(publicMeld) })];
+          return [event];
+        });
+        return out;
+      });
+      return view;
+    },
+    isRedacted(data) { return !!(data && data.redacted === true); },
     validate(data) {
       if (!data || data.format !== 'suitaku-riichi' || data.version !== 1 || !Array.isArray(data.hands) || !data.hands.length || data.hands.length > 500) throw new Error('翠卓のJSON牌譜を選んでください。');
+      if (data.redacted === true) {
+        // Masked records are for reporting only; they intentionally cannot be
+        // replayed because the wall and the other seats' hands are absent.
+        for (const h of data.hands) {
+          if (!h || !h.config || !Array.isArray(h.events)) throw new Error('マスク済み牌譜の局データが不正です。');
+          for (const e of h.events) {
+            if (!e || !['start', 'draw', 'discard', 'response', 'call', 'kan', 'dora', 'riichi', 'end'].includes(e.type)) throw new Error('牌譜のイベントが不正です。');
+            if (e.seat != null && (!Number.isInteger(e.seat) || e.seat < 0 || e.seat > 3)) throw new Error('席番号が不正です。');
+            if (e.type === 'draw' && !e.hidden && (!Number.isInteger(e.tileId) || e.tileId < 0 || e.tileId > 135)) throw new Error('牌IDが不正です。');
+            if (e.type === 'discard' && (!Number.isInteger(e.tileId) || e.tileId < 0 || e.tileId > 135)) throw new Error('牌IDが不正です。');
+          }
+        }
+        return data;
+      }
       const tile = (id) => Number.isInteger(id) && id >= 0 && id < 136;
       const ids = (a) => Array.isArray(a) && a.length <= 136 && a.every(tile);
       const nonnegative = (n) => n == null || (Number.isInteger(n) && n >= 0 && n <= 100000);
@@ -77,7 +141,7 @@
         lines.push(`\n局 #${i + 1} ${h.config.roundWind === 27 ? '東' : '南'}${h.config.dealer + 1}局 ${h.config.honba || 0}本場`);
         for (const e of h.events) {
           if (e.type === 'discard') lines.push(`[${e.index}] P${e.seat + 1} ${e.tsumogiri ? 'ツモ切り' : '手出し'} ${T.isRed(e.tileId) ? '赤' : ''}${T.label(e.tileId >> 2)}${e.riichi ? ' リーチ宣言' : ''}`);
-          else if (e.type === 'draw') lines.push(`[${e.index}] P${e.seat + 1} ${e.rinshan ? '嶺上' : ''}ツモ ${T.label(e.tileId >> 2)}`);
+          else if (e.type === 'draw') lines.push(`[${e.index}] P${e.seat + 1} ${e.rinshan ? '嶺上' : ''}ツモ ${e.hidden ? '?' : T.label(e.tileId >> 2)}`);
           else if (e.type === 'call' || e.type === 'kan') lines.push(`[${e.index}] P${e.seat + 1} ${JSON.stringify(e.action)}`);
           else if (e.type === 'response' && e.analysis?.kind === 'call') lines.push(`[${e.index}] P${e.seat + 1} 鳴き比較: ${e.analysis.advantagePercent}% / 推定期待収支差 ${e.analysis.delta}点 (勝率ではない)`);
           else if (e.type === 'end') lines.push(`結果: ${JSON.stringify(e.result)}\n点数: ${e.scores.join(' / ')}`);

@@ -4,13 +4,21 @@
   "description": "Browser riichi mahjong with AI opponents",
   "private": true,
   "scripts": {
-    "test": "node test/shanten.test.js && node test/score.test.js && node test/rules.test.js && node test/observation.test.js && node test/core.test.js && node test/rank.test.js && node test/mjai.test.js && node test/features.test.js && node test/evaluate.test.js && node test/ai.test.js && node test/train.test.js && node test/selfplay.test.js 300 && npm run build && node test/ui.test.js",
+    "test": "node test/shanten.test.js && node test/score.test.js && node test/rules.test.js && node test/observation.test.js && node test/leak.test.js && node test/core.test.js && node test/rank.test.js && node test/grp.test.js && node test/mjai.test.js && node test/features.test.js && node test/evaluate.test.js && node test/ai.test.js && node test/train.test.js && node test/selfplay.test.js 60 && npm run build && node test/ui.test.js --fast",
+    "test:full": "node test/shanten.test.js && node test/score.test.js && node test/rules.test.js && node test/observation.test.js && node test/leak.test.js && node test/core.test.js && node test/rank.test.js && node test/grp.test.js && node test/mjai.test.js && node test/features.test.js && node test/evaluate.test.js && node test/ai.test.js && node test/train.test.js && node test/selfplay.test.js 300 && npm run build && node test/ui.test.js",
     "build": "node build.js",
     "golden": "node tools/core-golden.js",
     "mjai": "node tools/mjai-convert.js",
     "features": "node tools/features.js",
     "evaluate": "node tools/evaluate.js",
-    "train": "node train.js"
+    "evaluate:fast": "node tools/evaluate.js --level fast",
+    "start-states": "node tools/start-states.js",
+    "train": "node train.js",
+    "grp:dataset": "node tools/grp-dataset.js",
+    "grp:train": "python tools/grp/train_grp.py",
+    "parquet": "python tools/to_parquet.py",
+    "mjai:smoke": "node tools/mjai-smoke.js",
+    "grp:selfplay": "node tools/grp-selfplay.js"
   },
   "devDependencies": {
     "@playwright/test": "^1.64.0"

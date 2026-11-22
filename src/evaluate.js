@@ -15,6 +15,11 @@
   };
 
   // One seed = the same wall replayed with the candidate in each of the four seats.
+  // At equal scores rankBias is inert, so candidate and baseline play identically;
+  // the four replayed games are then the same deal, and the candidate's four rank
+  // points are the four seats of that one deal (sum 0). A rotating handicap keeps
+  // the wall fixed while the candidate's standings differ by seat, so the four
+  // games genuinely differ and their mean is a valid per-seed cluster.
   E.runSeed = async function (options) {
     const seed = options.seed >>> 0;
     const candidateLevel = options.candidateLevel || options.level || 'standard';
@@ -22,30 +27,81 @@
     const candidateWeights = options.candidateWeights || MJ.ai.weights;
     const baselineWeights = options.baselineWeights || MJ.ai.weights;
     const rankConfig = options.rankConfig || 'tenhou';
-    const dealer = options.dealer != null ? options.dealer : seed % 4;
+    // Full-match duplicate evaluation: with a single hand all seats start on the
+    // same score, so rank-point pressure can barely move. A tonpu/hanchan match
+    // carries scores across hands and exercises the standings-aware part of the AI.
+    const matchMode = options.matchMode === 'hanchan' ? 'hanchan' : options.matchMode === 'tonpu' ? 'tonpu' : null;
+    const maxDeals = matchMode ? (matchMode === 'hanchan' ? 16 : 8) : 1;
+    const seatMode = options.candidateSeatMode == null ? 'rotate' : String(options.candidateSeatMode);
+    const seats = seatMode === 'rotate' ? [0, 1, 2, 3]
+      : [seatMode === 'seed' ? seed % 4 : Math.max(0, Math.min(3, Number(seatMode) | 0))];
+    // Keep the candidate seat and the first dealer independent; otherwise the
+    // candidate would always be the dealer when both use seed % 4.
+    const dealer = options.dealer != null ? options.dealer
+      : seatMode === 'seed' ? Math.floor(seed / 16) % 4 : seed % 4;
+    // A start state captured from a real Tenhou log (scores, dealer, honba,
+    // riichi sticks) replaces the synthetic opening. This is the mode used to
+    // validate rankBias: the standings are already uneven and hands are left.
+    const startStates = Array.isArray(options.startStates) ? options.startStates : [];
+    const startState = startStates.length ? startStates[seed % startStates.length] : null;
     const rows = [];
-    for (let candidateSeat = 0; candidateSeat < 4; candidateSeat++) {
+    for (const candidateSeat of seats) {
       const agents = [0, 1, 2, 3].map((seat) => MJ.ai.create(seat, {
         level: seat === candidateSeat ? candidateLevel : baselineLevel,
-        weights: seat === candidateSeat ? candidateWeights : baselineWeights
+        weights: seat === candidateSeat ? candidateWeights : baselineWeights,
+        rootCandidates: options.rootCandidates,
+        rankBias: seat === candidateSeat ? options.candidateRankBias !== false : options.baselineRankBias !== false
       }));
-      const game = new MJ.Game({ agents, rng: MJ.core.rng(seed) });
-      const result = await game.playHand({ roundWind: 27, dealer, honba: 0, riichiSticks: 0,
-        scores: [25000, 25000, 25000, 25000], hand: dealer, mode: 'tonpu' });
-      const scores = game.players.map((p) => p.score);
-      const settled = MJ.rank.finalResult(scores, rankConfig);
-      let calls = 0, riichis = 0;
-      for (const e of game.recording.events) {
-        if ((e.type === 'call' || e.type === 'kan') && e.seat === candidateSeat) calls++;
-        if (e.type === 'riichi' && e.seat === candidateSeat) riichis++;
+      const rng = MJ.core.rng(seed);
+      // Rank-point pressure is inactive when all four seats start equal. A
+      // rotating handicap gives every seed a different standing while keeping
+      // the candidate and control on exactly the same scores.
+      const rotate = (arr, n) => arr.map((_, i) => arr[(i + n) % 4]);
+      const baseScores = startState && Array.isArray(startState.scores) && startState.scores.length === 4
+        ? startState.scores.map(Number)
+        : Array.isArray(options.initialScores) && options.initialScores.length === 4
+          ? options.initialScores.slice()
+          : options.scorePattern === 'even'
+            ? [25000, 25000, 25000, 25000]
+            : rotate([40000, 25000, 20000, 15000], Math.floor(seed / 4) % 4);
+      const startHand = startState && Number.isInteger(startState.handIndex) ? Math.max(0, Math.min(7, startState.handIndex)) : 0;
+      const startDealer = startState && Number.isInteger(startState.dealer) ? startState.dealer : dealer;
+      const startHonba = startState ? Number(startState.honba) || 0 : 0;
+      const startSticks = startState ? Number(startState.riichiSticks) || 0 : 0;
+      let scores = baseScores.slice(), sticks = startSticks;
+      let state = { hand: startHand, dealer: startDealer, honba: startHonba, mode: matchMode || 'tonpu' };
+      let calls = 0, riichis = 0, win = false, tsumoWin = false, ronWin = false, dealIn = false, result = null, deals = 0;
+      for (let deal = 0; deal < maxDeals; deal++) {
+        const game = new MJ.Game({ agents, rng });
+        const handResult = await game.playHand({ roundWind: 27 + Math.floor(state.hand / 4), dealer: state.dealer,
+          honba: state.honba, riichiSticks: sticks, scores: scores.slice(), hand: state.hand, mode: matchMode || 'tonpu',
+          rankConfig });
+        deals++;
+        result = handResult;
+        scores = game.players.map((p) => p.score);
+        sticks = game.riichiSticks;
+        for (const e of game.recording.events) {
+          if ((e.type === 'call' || e.type === 'kan') && e.seat === candidateSeat) calls++;
+          if (e.type === 'riichi' && e.seat === candidateSeat) riichis++;
+        }
+        const handWin = handResult.type === 'win' && handResult.winner === candidateSeat;
+        win = win || handWin;
+        tsumoWin = tsumoWin || (handWin && !!handResult.tsumo);
+        ronWin = ronWin || (handWin && !handResult.tsumo);
+        dealIn = dealIn || (handResult.type === 'win' && !handResult.tsumo && handResult.loser === candidateSeat);
+        if (!matchMode) break;
+        const next = MJ.match.advance(state, handResult, scores);
+        state = { hand: next.hand, dealer: next.dealer, honba: next.honba, mode: matchMode };
+        if (next.ended) break;
       }
-      const win = result.type === 'win' && result.winner === candidateSeat;
-      const tsumoWin = win && !!result.tsumo;
-      const ronWin = win && !result.tsumo;
-      const dealIn = result.type === 'win' && !result.tsumo && result.loser === candidateSeat;
+      // The UI gives any remaining deposits to first place before ranking.
+      if (sticks) scores[MJ.rank.order(scores)[0]] += sticks * 1000;
+      const settled = MJ.rank.finalResult(scores, rankConfig);
       rows.push({ seed, candidateSeat, rank: settled.ranks[candidateSeat], points: settled.points[candidateSeat],
-        scores: scores.slice(), scoreDelta: scores[candidateSeat] - 25000, win, tsumoWin, ronWin, dealIn,
-        called: calls > 0, riichi: riichis > 0, calls, riichis, result: result.type });
+        scores: scores.slice(), startScores: baseScores.slice(),
+        scoreDelta: scores[candidateSeat] - baseScores[candidateSeat], win, tsumoWin, ronWin, dealIn, deals,
+        called: calls > 0, riichi: riichis > 0, calls, riichis, result: result && result.type,
+        startState: startState ? { handIndex: startHand, dealer: startDealer, honba: startHonba, riichiSticks: startSticks } : null });
     }
     return rows;
   };
@@ -69,7 +125,7 @@
     const distribution = [0, 0, 0, 0];
     for (const row of rows) distribution[row.rank - 1]++;
     return {
-      version: E.version, games, seeds: seedGroups.size,
+      version: E.version, games, seeds: seedGroups.size, gamesPerSeed: seedGroups.size ? games / seedGroups.size : 0,
       avgRankPoints: stats(rows.map((r) => r.points)),
       avgPlacement: stats(rows.map((r) => r.rank)),
       avgScoreDelta: stats(rows.map((r) => r.scoreDelta)),
@@ -102,6 +158,19 @@
     return stats(diffs);
   };
 
+  // How many independent seed clusters are needed to detect `effect` at the
+  // observed cluster standard deviation? n = (z * sd / effect)^2. This uses the
+  // per-seed mean (four seats/seed) as one cluster, so it does not pretend that
+  // the four replayed seats are independent samples.
+  E.power = function (options = {}) {
+    const sd = Number(options.sd), effect = Number(options.effect), z = Number(options.z) || 1.96;
+    if (!(sd >= 0) || !(effect > 0)) return { effect, seeds: null, games: null, note: 'effect must be positive and sd non-negative' };
+    const seeds = sd === 0 ? 1 : Math.max(1, Math.ceil((z * sd / effect) ** 2));
+    const seats = Number(options.seatsPerSeed) > 0 ? Number(options.seatsPerSeed) : 1;
+    return { effect, seeds, games: seeds * seats, alpha: Number(options.alpha) || 0.05, z,
+      observedSd: sd, seatsPerSeed: seats };
+  };
+
   E.formatReport = function (report, extra = {}) {
     const pct = (v) => (v * 100).toFixed(1) + '%';
     const ci = (s) => `[${(s.mean - s.ci95).toFixed(2)}, ${(s.mean + s.ci95).toFixed(2)}]`;
@@ -115,6 +184,9 @@
     ];
     if (extra.control) lines.push(`control seed-cluster ${extra.control.seedClusterRankPoints.mean.toFixed(2)}`);
     if (extra.delta) lines.push(`paired delta ${extra.delta.mean.toFixed(2)} (95% CI [${(extra.delta.mean - extra.delta.ci95).toFixed(2)}, ${(extra.delta.mean + extra.delta.ci95).toFixed(2)}], seeds ${extra.delta.n})`);
+    if (extra.power) for (const p of extra.power) {
+      lines.push(`power: effect ${p.effect.toFixed(2)} needs ${p.seeds} seeds / ${p.games} games (cluster sd ${p.observedSd.toFixed(2)})`);
+    }
     if (extra.gamesPerSecond != null) lines.push(`throughput ${extra.gamesPerSecond.toFixed(1)} games/s (${(extra.elapsedMs / 1000).toFixed(1)} s)`);
     return lines.join('\n');
   };

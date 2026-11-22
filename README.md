@@ -32,6 +32,8 @@
 - 数え役満あり、切り上げ満貫なし。役満は複合加算。大四喜・四暗刻単騎ロンはダブル役満です。国士十三面・純正九蓮・四暗刻単騎ツモはシングル扱いです。
 - 槓ドラ即乗り。最大4槓。嶺上牌4枚、ドラ／裏ドラ表示各5枚は重複のない14枚の王牌に割り当てています。嶺上ツモごとに生牌山の末尾を王牌へ補充します。
 - 暗槓は牌種だけを公開し、外側2枚の伏せ牌に赤5があっても赤かどうかは公開しません（内側の公開牌にある赤はそのまま見えます）。他家の手牌は枚数のみ、裏ドラ・牌山・他家の手牌IDは観測ビューに含めません。
+- 対局中の牌譜（localStorageへの自動保存・途中書き出し）はマスクされます。牌山・他家の配牌/ツモ・他家の鳴き候補・他家AIの解析は含まれず、終局後に保存した牌譜だけが全情報を含みます。`MJ.ui.record` も対局中はマスク済みのコピーを返します。
+- 他家の応答チェックは、鳴ける・ロンできる場合もできない場合も同じ固定待ち時間で行います。待ち時間の差から他家の手牌を推測できないようにしています。
 - フリテンは全待ちを判定。見逃し同巡フリテン・リーチ後見逃しフリテンあり。加槓の搶槓、国士による暗槓の搶槓に対応します。
 
 ## AI
@@ -62,7 +64,7 @@
 
 参考資料・コメントへの対応状況は [AI_REVIEW.md](AI_REVIEW.md) を参照してください。
 
-思考型は公開情報だけを使うヒューリスティック探索型です。相手の手牌・未来のツモ・裏ドラは参照しません。
+思考型は公開情報だけを使うヒューリスティック探索型です。相手の手牌・未来のツモ・裏ドラは参照しません。順位点圧力（`rankBias`）は点差・残り局数・順位点設定から押し引きを補正します。`rankBias:false` で旧来の順位点無視に戻せます。
 
 - 通常形・七対子・国士の向聴数と未見牌に基づく受入枚数
 - 有力な候補について、向聴数を改善するツモの次の受入まで探索
@@ -111,14 +113,21 @@ const result = core.final_result();
 
 ```bash
 node tools/mjai-convert.js to-mjai suitaku.json out.jsonl
+node tools/mjai-convert.js to-mjai suitaku.json seat0.jsonl --seat 0 --mask-other-draws
 node tools/mjai-convert.js from-mjai out.jsonl back.json --strict
 node tools/mjai-convert.js tenhou game.mjlog.gz out.jsonl
-node tools/mjai-convert.js tenhou-to-suitaku game.mjlog.gz game.json --strict
+node tools/mjai-convert.js tenhou-to-suitaku game.mjlog.gz game.json --strict --verify-wall
+node tools/mjai-smoke.js out.jsonl
 ```
 
 - 翠卓JSON ↔ mjai は双方向。天鳳 mjlog（XML / gzip）→ mjai → 翠卓JSONも変換できます。
 - 取り込み時は牌山を136枚の一意な牌IDで再構築し、`MJ.record.snapshot` で全イベントをリプレイして、点数合計・最終点数・イベント番号を検証します。失敗した局は警告を出して終了コード1にします。
-- 赤なし・喰いタンなし・三麻・複数ロン（頭ハネと異なる）はルール差としてフラグを付けます。`--strict` では除外（例外）にします。天鳳の三麻は四人打ちcoreでは扱いません。
+- 赤なし・喰いタンなし・三麻・複数ロン（頭ハネと異なる）に加え、天鳳の九種九牌（`yao9`）・流し満貫（`nm`）・包（`paoWho`）もルール差としてフラグを付けます。`--strict` では除外（例外）にします。天鳳の三麻は四人打ちcoreでは扱いません。
+- 天鳳の `AGARI`/`RYUUKYOKU` の `sc` は「和了前点数, 増減」のペアとして読みます。最終点数は `before + delta` です。
+- 天鳳の30000点返し（オカ20）は `record.mjai.tenhou` に `rankConfig` 差として記録します。翠卓の `rank.tenhou` は25000点返しなので、順位点を比較するときはこの差を適用してください。
+- `--verify-wall` は `<SHUFFLE seed="mt19937ar-sha512-n288-base64,...">` から牌山を再現し、配牌・生牌山のツモ順・ドラ/裏ドラ・嶺上牌を牌譜と比較します。天鳳の牌山は先頭14枚が王牌、末尾から配牌・ツモという配置です。物理コピー番号はmjai変換で保持されないため、牌種と赤5で比較します。嶺上牌は先頭4枚と仮定しています（手元の実サンプルにカンがなく、嶺上順は未確認）。
+- `--seat N --mask-other-draws` は座席視点の学習データ用に、他家の `tsumo` を `pai: "?"` にします。マスク済みファイルは再変換できないので、学習入力専用です。
+- `tools/mjai-smoke.js` は依存なしでイベント型・席・牌表記・点数合計を検査します。`--command "..."` でMortal系ツールにファイルを渡し、終了コードを確認できます。
 - mjaiは牌種と赤5を保持しますが、同じ牌種の物理コピー番号は保持しません。天鳳の役IDは既知のものを日本語名に変換し、未知IDは `yaku_<id>` とします。
 - 天鳳・雀魂などの牌譜は各配布元の利用規約に従ってください。本リポジトリは牌譜データを同梱・再配布しません。学習・検討に使う場合は、各サービスの規約と権利者の許可を確認してください。雀魂形式の直接変換は未実装です。
 
@@ -132,30 +141,57 @@ node tools/mjai-convert.js tenhou-to-suitaku game.mjlog.gz game.json --strict
 - サンプルは行動直前の `getObservation(seat)` から作るため、他家の手牌・牌山・裏ドラはテンソルに入りません（`test/features.test.js` で他家の手牌を入れ替えてもテンソルが不変なことを検証）。
 - JSONLの1行が1サンプルです。ゲーム単位でファイルを分ければシャードになり、行単位のストリーミングDataLoaderで読めます。
 
-Parquetが必要な場合は、JSONLをPythonで読み、`pandas.json_normalize` などで整形して `pyarrow` で `to_parquet` してください。リポジトリにはPyArrow依存を追加していません。
+チャンネル定義とスキーマ版（`obs-v1`、34×25＋31）は [docs/features.md](docs/features.md) にあります。チャンネルや順序を変えるときは版を上げてください。
 
-```python
-import pandas as pd
-df = pd.read_json("features-000.jsonl", lines=True)
-# x は881次元の配列。学習側で reshape(25, 34) と globals 31 に分ける。
-df.to_parquet("features-000.parquet")
+Parquetが必要な場合は `tools/to_parquet.py` を使います（`pyarrow` が必要）。
+
+```bash
+python tools/to_parquet.py features-*.jsonl --out data/parquet --shard-size 100000
 ```
+
+- シャード分割、行数・チャンネル名・グローバル名を `_metadata.json` に記録します。
+- ファイルメタデータに `features-parquet-v1` と `feature_version`（`obs-v1`）を保存します。
+- `x` は881次元の `list<float>` のまま保存します。学習側で `reshape(25, 34)` と末尾31に分けます。
+
+### 順位分布モデル（GRP）
+
+`src/grp.js` は Game Result Prediction の入力スキーマ（`grp-v1`、17特徴）と推論器です。局開始時点の (局, 本場, 供託, 4人の点数, 残り局数, 席) から最終順位の分布を推定します。
+
+```bash
+node tools/grp-dataset.js "Saved Data" --out data/grp.jsonl
+python tools/grp/train_grp.py --train data/grp.jsonl --out-dir models --hidden 64,64
+node tools/evaluate.js --seeds 20 --workers 8 --match tonpu --grp models/grp.json
+```
+
+- `grp.json` はNumPyで学習したMLP（標準化込み）で、`MJ.rank.setRankModel(model)` に渡すと `MJ.rank.expectedPoints()` のヒューリスティックな順位点EVを置き換えます。開始画面の「順位分布モデル（GRP）を読み込む」からも読み込めます。`MJ.rank.clearRankModel()` で戻せます。
+- `grp.onnx` は同じMatMul/Add/ReLU/Softmaxで、ONNX Runtime系から読めます。学習時にJSONとONNXの出力差を検査します。ブラウザーで使う場合は `onnxruntime-web` を追加してください（このリポジトリにはまだ依存を追加していません）。
+- 学習データは天鳳mjlogを `tools/mjai-convert.js` で変換した翠卓JSON、または翠卓の自己対戦JSONです。牌譜データ自体は同梱しません。
+- ラベルは最終順位で、勝率や和了率ではありません。サンプル数が少ないモデルは順位分布を過学習するため、評価用シードと学習用シードを分けてください。
+- 動作確認: 自己対戦200試合（3,808サンプル、8:2分割）で val accuracy 0.903 / logloss 0.343 / Brier 0.163、JSONとONNXの最大差 1.1e-07。自己対戦由来で楽観的な数値であり、天鳳実データでの精度ではありません。
 
 ### 評価（duplicate自己対戦）
 
-`node tools/evaluate.js` は、同じ牌山シードを候補AIが席0〜3に順番に入って4局ずつ打ち、基準AI 3体との比較を分散の小さいduplicate方式で評価します。ワーカースレッドで並列実行します。
+`node tools/evaluate.js` はワーカースレッドでduplicate自己対戦を並列実行します。**候補を4席すべてに順番に入れる既定モード（`--candidate-seat rotate`）は、順位点がゼロサムの設定では候補の平均順位点が構造上つねに0になります。** これは基準AIの平均的な強さや和了率を見るのには使えますが、2つのpolicyの優劣判定には使えません。
+
+policy比較には、1シード1対局・候補席をシードから決め、同じシード・同じ席の基準AI対照とペア比較するモードを使います。
 
 ```bash
-node tools/evaluate.js --candidate weights.json --seeds 400 --workers 8 --out report.json
-node tools/evaluate.js --seeds 200 --rank mleague --control
-node tools/evaluate.js --level strong --candidate weights.json --seeds 20
+node tools/evaluate.js --seeds 1000 --workers 12 --rank tenhou --candidate-seat seed   --score-pattern handicap --control --baseline-no-rank-bias --out report.json
+node tools/evaluate.js --seeds 500 --workers 8 --match tonpu --rank tenhou   --candidate-seat seed --control --baseline-no-rank-bias --out match.json
+node tools/evaluate.js --seeds 200 --workers 4 --rank raw --candidate-seat seed   --score-pattern handicap --control --baseline-no-rank-bias --out raw.json
+node tools/evaluate.js --seeds 20 --workers 8 --match tonpu --grp models/grp.json
 ```
 
-- 指標: 平均順位点、平均順位（1〜4）、順位分布、和了率・ツモ率・ロン率・放銃率・副露率・リーチ率、平均素点差。
-- 95%信頼区間は正規近似です。シード単位のクラスタ平均も出すため、同一牌山の4席分を独立標本として過大評価しません。
-- `--rank tenhou` は順位点がゼロサムなので、シードクラスタ平均のCIが0より上なら改善、0を含めば判定保留です。`mleague` / `raw` のようにゼロサムでない設定では `--control` を付けて基準AI同士の対照評価とのペア差（同じシード）で判定してください。
-- スループット（games/s）と経過秒数を表示・JSONに記録します。`--level strong` は1局十数秒かかるため、まず `standard` で絞ってから使います。
-- 新しいモデルの採用は、数万局規模でCIが0をまたがないことを条件にするのが安全です。短い評価は牌山への過適合を含みます。
+- `--candidate-seat seed` はシードごとに候補席を1つ選び、1対局だけ打ちます。`--control` は同じシード・同じ席で基準AI同士を打たせ、`paired delta` を出します。この差の95%信頼区間が0をまたぐ場合は「改善未確認」です。
+- `--candidate-seat rotate`（既定）は4局/シードで、平均順位点はゼロサム設定では0になります。率の指標（和了率・放銃率・副露率・リーチ率）だけを見てください。
+- `--score-pattern handicap` は開始点数を `40,000 / 25,000 / 20,000 / 15,000` の順でシードごとに回転させ、1局でも順位点圧力が働くようにします。大規模比較向けです（今回の実測は1000シード）。
+- `--match tonpu|hanchan` は通し対局です。実戦に近い確認にはこちらを500シード程度で併用してください。`rankBias` は点差が動いて初めて働くため、同点開始の1局だけではほとんど差が出ません。
+- `--candidate-no-rank-bias` / `--baseline-no-rank-bias` で順位点圧力を無効化できます。旧AI（rankBiasなし）をbaseline、新AIをcandidateにする比較に使います。
+- `--grp FILE` は学習済みGRPモデルをrank EVに使います（両側）。
+- 指標: 平均順位点、平均順位、順位分布、和了率・ツモ率・ロン率・放銃率・副露率・リーチ率、平均素点差、ペア差、スループット。
+- 95%信頼区間は正規近似です。`--candidate-seat seed` では1シード1標本なので、同一牌山の4席分を独立標本として数えません。
+- 新しいモデルの採用は、数万局規模でペア差のCIが0をまたがないことを条件にするのが安全です。短い評価は牌山への過適合を含みます。
+- 2026-11-22の計測（standard、handicap、1000シード）: rankBiasあり−なしのペア差は **+0.18点（95% CI −0.17〜+0.53）** で「改善未確認」。raw 200シードは 0.00（設計上）。詳細は [AI_REVIEW.md](AI_REVIEW.md)。
 
 ## 効果音・Voicepeak発声
 
@@ -176,6 +212,16 @@ JSONには以下を保存します。
 牌IDは `牌種 × 4 + コピー番号`、牌種は萬子0–8・筒子9–17・索子18–26・東南西北白發中27–33です。赤牌IDは16・52・88です。JSONは翠卓独自形式で、天鳳・雀魂形式との互換はありません。
 
 局終了時の牌譜はブラウザーのローカルストレージにも保存され、次回開始画面から検討できます。継続プレイのセーブではありません。保存容量やブラウザー設定に制限があるため、残したい牌譜はJSONで保存してください。
+
+## 漏えい監査
+
+`test/leak.test.js` と `test/ui.test.js` で、対局中に公開されてはいけない情報を検査します。
+
+- 対局中の `MJ.ui.record` と localStorage / 書き出しJSONには、牌山（`wall`）・他家の配牌（`initialHands`）・他家のツモ牌（`draw.tileId`）・他家の応答候補（`response.options`）・他家AIの解析（`discard.analysis`）が含まれません。
+- 暗槓の伏せ牌にある赤5は、対局中も記録・表示・マスク済みJSONで公開しません。
+- 応答チェックの待ち時間は、各家に合法な鳴き/ロンがあるかどうかで変わりません（`Game#checkCalls` の `onCheck`）。
+- `src/` に `console.log` / `console.debug` / `console.info` はありません。`#log`（aria-live）・トースト・コンソールに他家の手牌名が出ないことをテストします。
+- 終局後は `MJ.ui.record` と保存JSONが全情報を含みます。マスク済みJSONは再検討できません（`redacted: true`）。
 
 ## 開発・検証
 
@@ -203,7 +249,13 @@ node train.js --eval weights.json --hands 240
 - 目的関数は候補席の平均最終点数です。局数が少ないと特定の牌山に過適合するので、`--hands` を増やし、最後に `--eval` で別シードを確認してください。
 - 主なオプションは `node train.js --help` を参照してください。
 
-テストは向聴・点数の回帰確認、王牌・フリテン・対局進行のルール確認、観測ビューの公開情報（他家の手牌ID・牌山・裏ドラを含まないこと、暗槓の赤非公開）、core APIのgolden再現・決定性・136枚保存則、順位点と順位点EV、mjai双方向変換・天鳳mjlogリプレイ・ルール差フラグ、特徴量の非漏えい・ラベル・JSONL、duplicate評価の順位点・CI・決定性、シード固定300局のAI対戦（点数・136枚の保存則・牌譜再生一致）、Chromiumによる実ブラウザー操作（画面幅・フォント・河配置・伏せ牌の非漏えい・新規対局・対局終了・書き出し／読み込み）を実行します。
+テストは向聴・点数の回帰確認、王牌・フリテン・対局進行のルール確認、観測ビューの公開情報（他家の手牌ID・牌山・裏ドラを含まないこと、暗槓の赤非公開）、対局中牌譜のマスクと固定応答待ち時間、core APIのgolden再現・決定性・136枚保存則、順位点と順位点EV、GRP特徴量・モデル読み込み、mjai双方向変換・天鳳mjlogリプレイ・ルール差フラグ・牌山配置・座席視点マスク、特徴量の非漏えい・ラベル・JSONL、duplicate評価の順位点・CI・決定性・候補席モード、シード固定300局のAI対戦（点数・136枚の保存則・牌譜再生一致）、Chromiumによる実ブラウザー操作（画面幅・フォント・河配置・伏せ牌の非漏えい・新規対局・対局終了・書き出し／読み込み）を実行します。
+
+## 未着手・今後の作業
+
+- Rust coreは `rust/` に骨組み（`tiles` の実装＋`shanten/agari/score` のスタブ＋golden JSON読み込みテスト）だけがあります。CI（`.github/workflows/ci.yml`）で `cargo test` を回しますが、JS coreのgolden（`test/golden/core-*.json`）を同じ操作列で再生してイベント一致0を確認するテストは未実装です。
+- 雀魂牌譜の直接変換は、利用規約の確認後に着手します（優先度低）。
+- GRPのブラウザー推論（`onnxruntime-web`）と学習型COMのUI選択、自己対戦強化学習（PPO＋相手プール）は未着手です。
 
 ### フォント
 

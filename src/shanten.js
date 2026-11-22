@@ -6,18 +6,106 @@
     return 8 - 2 * (sets + openSets) - Math.min(taatsu, 4 - sets - openSets) - pair;
   }
 
+  // FIFO eviction avoids the latency spikes of clearing a large table. The key
+  // is the exact 34-count vector, so hand-hash collisions cannot occur.
+  const insert = (map, key, value, limit) => {
+    if (map.size >= limit) map.delete(map.keys().next().value);
+    map.set(key, value);
+  };
+  // Suit-wise decomposition table. A 14-tile hand is three 9-rank suits plus
+  // seven honors; caching those small patterns has a far higher hit rate than
+  // caching whole hands. Each group keeps its Pareto-optimal (melds, taatsu,
+  // pair) options; combining the four groups is a small DP over <=50 states.
+  const groupCache = new Map();
+  function groupOptions(counts, suited) {
+    const key = (suited ? 's' : 'h') + counts.join('');
+    const hit = groupCache.get(key);
+    if (hit) return hit;
+    const c = counts.slice(), best = new Map();
+    function dfs(i, melds, taatsu, pair) {
+      while (i < c.length && c[i] === 0) i++;
+      if (i >= c.length) {
+        const k = melds * 2 + pair, t = Math.min(4, taatsu);
+        if (!(best.get(k) >= t)) best.set(k, t);
+        return;
+      }
+      if (melds > 4) return;
+      const n = suited ? i % 9 : 0;
+      if (c[i] >= 3) {
+        c[i] -= 3; dfs(i, melds + 1, taatsu, pair); c[i] += 3;
+      }
+      if (suited && n <= 6 && c[i + 1] > 0 && c[i + 2] > 0) {
+        c[i]--; c[i + 1]--; c[i + 2]--; dfs(i, melds + 1, taatsu, pair); c[i]++; c[i + 1]++; c[i + 2]++;
+      }
+      if (c[i] >= 2) {
+        if (!pair) { c[i] -= 2; dfs(i, melds, taatsu, 1); c[i] += 2; }
+        c[i] -= 2; dfs(i, melds, taatsu + 1, pair); c[i] += 2;
+      }
+      if (suited && n <= 7 && c[i + 1] > 0) {
+        c[i]--; c[i + 1]--; dfs(i, melds, taatsu + 1, pair); c[i]++; c[i + 1]++;
+      }
+      if (suited && n <= 6 && c[i + 2] > 0) {
+        c[i]--; c[i + 2]--; dfs(i, melds, taatsu + 1, pair); c[i]++; c[i + 2]++;
+      }
+      c[i]--; dfs(i, melds, taatsu, pair); c[i]++;
+    }
+    dfs(0, 0, 0, 0);
+    const all = [...best].map(([k, taatsu]) => ({ m: Math.floor(k / 2), p: k & 1, t: taatsu }));
+    const options = all.filter((a) => !all.some((b) => b !== a && b.m >= a.m && b.t >= a.t && b.p >= a.p &&
+      (b.m > a.m || b.t > a.t || b.p > a.p)));
+    insert(groupCache, key, options, 120000);
+    return options;
+  }
+
+  function pruneStates(states) {
+    const out = [];
+    for (const a of states) {
+      if (!states.some((b) => b !== a && b[0] >= a[0] && b[1] >= a[1] && b[2] >= a[2] &&
+        (b[0] > a[0] || b[1] > a[1] || b[2] > a[2]))) out.push(a);
+    }
+    return out;
+  }
+
+  function standardTable(counts, openSets) {
+    const groups = [
+      groupOptions(counts.slice(0, 9), true),
+      groupOptions(counts.slice(9, 18), true),
+      groupOptions(counts.slice(18, 27), true),
+      groupOptions(counts.slice(27, 34), false)
+    ];
+    const meldCap = Math.max(0, 4 - openSets);
+    let states = [[0, 0, 0]];
+    for (const options of groups) {
+      const next = [];
+      for (const [m, t, p] of states) for (const o of options) {
+        next.push([Math.min(meldCap, m + o.m), Math.min(4, t + o.t), p | o.p]);
+      }
+      states = pruneStates(next);
+    }
+    let min = 99;
+    for (const [m, t, p] of states) {
+      const sets = m + openSets;
+      if (sets > 4) continue;
+      const value = 8 - 2 * sets - Math.min(t, 4 - sets) - p;
+      if (value < min) min = value;
+    }
+    return min;
+  }
+
   const standardCache = new Map();
   S.standard = function (counts, openSets) {
     openSets = openSets || 0;
     const key = openSets + ':' + counts.join('');
     let value = standardCache.get(key);
     if (value === undefined) {
-      value = standardRaw(counts, openSets);
-      if (standardCache.size > 200000) standardCache.clear();
-      standardCache.set(key, value);
+      value = standardTable(counts, openSets);
+      insert(standardCache, key, value, 200000);
     }
     return value;
   };
+  // Internal reference implementation, kept for the regression test that
+  // compares the table against the original depth-first search.
+  S.standardReference = standardRaw;
 
   function standardRaw(counts, openSets) {
     const c = counts.slice();
@@ -101,8 +189,7 @@
     if (openSets === 0) {
       best = Math.min(best, S.chiitoi(counts), S.kokushi(counts));
     }
-    if (cache.size > 80000) cache.clear();
-    cache.set(key, best);
+    insert(cache, key, best, 80000);
     return best;
   };
 

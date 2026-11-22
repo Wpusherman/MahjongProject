@@ -87,6 +87,8 @@
   // ---------------------------------------------------------------------------
   M.fromSuitaku = function (record, options = {}) {
     if (!record || !Array.isArray(record.hands) || !record.hands.length) throw new Error('翠卓の牌譜が必要です');
+    const seat = Number.isInteger(options.seat) && options.seat >= 0 && options.seat < 4 ? options.seat : null;
+    const maskOtherDraws = !!options.maskOtherDraws && seat != null;
     const events = [];
     events.push({ type: 'start_game', names: options.names || ['P0', 'P1', 'P2', 'P3'],
       rule: { aka: (record.rules && record.rules.redFives) !== 0, kuitan: !!(record.rules && record.rules.openTanyao),
@@ -102,7 +104,8 @@
         tehais: hand.initialHands.map((ids) => ids.map(tileString)), scores: (config.scores || []).slice() });
       for (const e of hand.events || []) {
         if (e.type === 'start' || e.type === 'riichi' || e.type === 'response') continue;
-        if (e.type === 'draw') events.push({ type: 'tsumo', actor: e.seat, pai: tileString(e.tileId), ...(e.rinshan ? { rinshan: true } : {}) });
+        if (e.type === 'draw') events.push({ type: 'tsumo', actor: e.seat,
+          pai: maskOtherDraws && e.seat !== seat ? '?' : tileString(e.tileId), ...(e.rinshan ? { rinshan: true } : {}) });
         else if (e.type === 'discard') {
           if (e.riichi) events.push({ type: 'reach', actor: e.seat });
           events.push({ type: 'dahai', actor: e.seat, pai: tileString(e.tileId), tsumogiri: !!e.tsumogiri });
@@ -169,6 +172,25 @@
     }
     if (current) rounds.push(current);
     if (!rounds.length) throw new Error('start_kyoku がありません');
+
+    // 翠卓 does not adopt nine terminals, nagashi mangan or pao. Keep these as
+    // explicit rule differences instead of silently importing them.
+    const ruleDiffs = new Set();
+    for (const round of rounds) for (const event of round.events) {
+      if (event.type === 'ryukyoku') {
+        if (event.reason === 'nine_terminals') ruleDiffs.add('nine_terminals');
+        if (event.reason === 'nagashi') ruleDiffs.add('nagashi_mangan');
+      }
+      if (event.type === 'hora' && event.paoWho != null) ruleDiffs.add('pao');
+    }
+    const DIFF_MESSAGES = {
+      nine_terminals: '九種九牌は翠卓のルールでは採用していません',
+      nagashi_mangan: '流し満貫は翠卓のルールでは採用していません',
+      pao: '包（責任払い）は翠卓のルールでは採用していません'
+    };
+    if (strict && ruleDiffs.size) throw new Error([...ruleDiffs].map((d) => DIFF_MESSAGES[d]).join(' / ') + '。--strict では除外します');
+    flags.push(...ruleDiffs);
+    const tenhouSource = options.source === 'tenhou' || rule.source === 'tenhou';
 
     const hands = rounds.map((round, handIndex) => {
       const pool = createPool();
@@ -295,7 +317,8 @@
             const result = { type: 'win', winner: e.actor, loser: tsumo ? null : (e.target == null ? null : e.target),
               tsumo, score: { han: Number(e.han) || 0, fu: Number(e.fu) || 0, yaku, dora: Number(e.dora) || 0,
                 yakuman: !!e.yakuman, payments: {} }, winTile, uraIndicators: state.ura.slice(),
-              received: deltas[e.actor] || 0, sticks: config.riichiSticks };
+              received: deltas[e.actor] || 0, sticks: config.riichiSticks,
+              ...(e.paoWho == null ? {} : { paoWho: e.paoWho }) };
             state.result = result; state.finalScores = finalScores; state.riichiSticks = 0;
             emit({ type: 'end', scores: finalScores.slice(), result, riichiSticks: 0 });
             break;
@@ -360,8 +383,17 @@
         dealerTenpaiRepeat: true, agariYame: false, extension: false, kuikae: false,
         nineTerminals: false, nagashiMangan: false },
       hands, annotations: [], finalScores: hands[hands.length - 1].finalScores.slice(), finished: true,
-      mjai: { rule: clone(rule), flags, source: options.source || 'mjai' }
+      mjai: { rule: clone(rule), flags: [...new Set(flags)], source: options.source || 'mjai' }
     };
+    if (tenhouSource) {
+      record.rules.returnScore = 30000;
+      record.rules.pao = false;
+      record.mjai.tenhou = {
+        startScore: 25000, returnScore: 30000, okaPerFirst: 20,
+        rankConfig: { name: 'tenhou', uma: [90, 45, 0, -135], startScore: 25000, returnScore: 30000, scoreUnit: 1000, scoreWeight: 0 },
+        note: '天鳳は30000点返し（オカ20）です。翠卓の rankConfig tenhou は25000点返しなので、順位点を比較するときはこの差を適用してください。'
+      };
+    }
     return record;
   };
 
@@ -484,19 +516,22 @@
         const yakuRaw = (attrs.yaku || '').split(',').filter(Boolean).map(Number);
         const yaku = [];
         for (let i = 0; i + 1 < yakuRaw.length; i += 2) yaku.push(yakuName(yakuRaw[i]));
-        const scores = [0, 1, 2, 3].map((i) => (sc[i * 2] || 0) * 100);
+        // Tenhou's sc is (score before the result, delta) per seat, in 100-point units.
+        const scores = [0, 1, 2, 3].map((i) => ((sc[i * 2] || 0) + (sc[i * 2 + 1] || 0)) * 100);
         const deltas = [0, 1, 2, 3].map((i) => (sc[i * 2 + 1] || 0) * 100);
         const ura = (attrs.doraHaiUra || '').split(',').filter(Boolean).map((x) => tileString(Number(x)));
         events.push({ type: 'hora', actor: who, target: who === fromWho ? who : fromWho,
           pai: tileString(Number(attrs.machi)), tsumo: who === fromWho, deltas, scores,
           yaku, han: yakuRaw.filter((_, i) => i % 2 === 1).reduce((a, b) => a + b, 0), fu: ten[0] || 0,
-          point: ten[1] || deltas[who], ura_markers: ura });
+          point: ten[1] || deltas[who], ura_markers: ura,
+          ...(attrs.paoWho == null ? {} : { paoWho: Number(attrs.paoWho) }) });
         roundEnded = true;
         continue;
       }
       if (tag === 'RYUUKYOKU') {
         const sc = (attrs.sc || '').split(',').map(Number);
-        const scores = [0, 1, 2, 3].map((i) => (sc[i * 2] || 0) * 100);
+        // Tenhou's sc is (score before the result, delta) per seat, in 100-point units.
+        const scores = [0, 1, 2, 3].map((i) => ((sc[i * 2] || 0) + (sc[i * 2 + 1] || 0)) * 100);
         const deltas = [0, 1, 2, 3].map((i) => (sc[i * 2 + 1] || 0) * 100);
         const tenpai = [0, 1, 2, 3].filter((i) => attrs['hai' + i] != null);
         events.push({ type: 'ryukyoku', reason: mapTenhouReason(attrs.type), tenpai, deltas, scores });
@@ -508,6 +543,149 @@
     finishRound();
     events.push({ type: 'end_game' });
     return events;
+  };
+
+  // ---------------------------------------------------------------------------
+  // Tenhou wall reproduction (optional verification)
+  //
+  // The seed in <SHUFFLE seed="mt19937ar-sha512-n288-base64,..."> is decoded to
+  // 624 little-endian uint32 values and used with mt19937ar init_by_array.
+  // Each hand consumes 288 uint32 values -> nine SHA-512 blocks -> 144 uint32
+  // values used by Fisher-Yates. The generated array has the dead wall at the
+  // head and the live wall at the tail (draws run from index 135 downwards).
+  // ---------------------------------------------------------------------------
+  function mt19937FromSeed(seedBytes) {
+    if (seedBytes.length !== 624 * 4) throw new Error('天鳳seedは624個の32bit整数（2496バイト）ではありません');
+    const key = new Uint32Array(624);
+    for (let i = 0; i < 624; i++) key[i] = seedBytes.readUInt32LE ? seedBytes.readUInt32LE(i * 4)
+      : (seedBytes[i * 4] | (seedBytes[i * 4 + 1] << 8) | (seedBytes[i * 4 + 2] << 16) | (seedBytes[i * 4 + 3] << 24)) >>> 0;
+    const mt = new Uint32Array(624);
+    let index = 624;
+    const initGenrand = (s) => {
+      mt[0] = s >>> 0; index = 1;
+      while (index < 624) { mt[index] = (Math.imul(1812433253, mt[index - 1] ^ (mt[index - 1] >>> 30)) + index) >>> 0; index++; }
+    };
+    initGenrand(19650218);
+    let i = 1, j = 0, k = Math.max(624, key.length);
+    for (; k; k--) {
+      mt[i] = ((mt[i] ^ Math.imul(mt[i - 1] ^ (mt[i - 1] >>> 30), 1664525)) + key[j] + j) >>> 0;
+      i++; j++;
+      if (i >= 624) { mt[0] = mt[623]; i = 1; }
+      if (j >= key.length) j = 0;
+    }
+    for (k = 623; k; k--) {
+      mt[i] = ((mt[i] ^ Math.imul(mt[i - 1] ^ (mt[i - 1] >>> 30), 1566083941)) - i) >>> 0;
+      i++;
+      if (i >= 624) { mt[0] = mt[623]; i = 1; }
+    }
+    mt[0] = 0x80000000;
+    const generate = () => {
+      for (let n = 0; n < 624; n++) {
+        const y = (mt[n] & 0x80000000) | (mt[(n + 1) % 624] & 0x7fffffff);
+        mt[n] = mt[(n + 397) % 624] ^ (y >>> 1) ^ ((y & 1) ? 0x9908b0df : 0);
+      }
+      index = 0;
+    };
+    return function genrand() {
+      if (index >= 624) generate();
+      let y = mt[index++];
+      y ^= y >>> 11; y ^= (y << 7) & 0x9d2c5680; y ^= (y << 15) & 0xefc60000; y ^= y >>> 18;
+      return y >>> 0;
+    };
+  }
+  function nodeSha512() {
+    try {
+      if (typeof require === 'function') return (bytes) => require('node:crypto').createHash('sha512').update(bytes).digest();
+    } catch (_) { /* browser */ }
+    return null;
+  }
+  M.tenhouSeed = function (xml) {
+    if (typeof xml !== 'string') throw new Error('mjlog XML text is required');
+    const match = /<SHUFFLE\s+seed="([^"]+)"/.exec(xml);
+    if (!match) throw new Error('SHUFFLE seed がありません');
+    return match[1].includes(',') ? match[1].slice(match[1].lastIndexOf(',') + 1) : match[1];
+  };
+  M.tenhouWalls = function (xml, options = {}) {
+    if (typeof xml !== 'string') throw new Error('mjlog XML text is required');
+    const sha512 = nodeSha512();
+    if (!sha512) throw new Error('牌山の再現にはNode.jsのcryptoが必要です');
+    const b64 = M.tenhouSeed(xml);
+    let seedBytes;
+    try { seedBytes = Buffer.from(b64, 'base64'); } catch (_) { throw new Error('天鳳seedのbase64デコードに失敗しました'); }
+    const genrand = mt19937FromSeed(seedBytes);
+    const rounds = Number.isInteger(options.rounds) ? options.rounds : (xml.match(/<INIT\b/g) || []).length;
+    const walls = [];
+    for (let round = 0; round < rounds; round++) {
+      const src = new Uint32Array(288);
+      for (let i = 0; i < 288; i++) src[i] = genrand();
+      const rnd = [];
+      for (let block = 0; block < 9; block++) {
+        const bytes = Buffer.alloc(128);
+        for (let i = 0; i < 32; i++) bytes.writeUInt32LE(src[block * 32 + i], i * 4);
+        const digest = sha512(bytes);
+        for (let i = 0; i < 16; i++) rnd.push(digest.readUInt32LE(i * 4));
+      }
+      const yama = Array.from({ length: 136 }, (_, i) => i);
+      for (let i = 0; i < 135; i++) {
+        const j = rnd[i] % (136 - i) + i;
+        const tmp = yama[i]; yama[i] = yama[j]; yama[j] = tmp;
+      }
+      walls.push(yama);
+    }
+    return walls;
+  };
+  // Convert one Tenhou yama into the deal/draw order used by Game#setup.
+  // Tenhou deals from the tail: 4 tiles per seat for three rounds, then one.
+  M.tenhouWallLayout = function (yama, dealer) {
+    if (!Array.isArray(yama) || yama.length !== 136) throw new Error('yama must have 136 tiles');
+    const d = Number.isInteger(dealer) && dealer >= 0 && dealer < 4 ? dealer : 0;
+    const dealt = [[], [], [], []];
+    for (let batch = 0; batch < 3; batch++) {
+      for (let i = 0; i < 4; i++) for (let k = 0; k < 4; k++) {
+        dealt[(d + i) % 4].push(yama[135 - (batch * 16 + i * 4 + k)]);
+      }
+    }
+    for (let i = 0; i < 4; i++) dealt[(d + i) % 4].push(yama[87 - i]);
+    const live = [];
+    for (let i = 83; i >= 14; i--) live.push(yama[i]);
+    return { dealt, live, rinshan: yama.slice(0, 4), dora: [5, 7, 9, 11, 13].map((i) => yama[i]),
+      ura: [4, 6, 8, 10, 12].map((i) => yama[i]) };
+  };
+  M.verifyTenhouWall = function (xml, record, options = {}) {
+    if (!record || !Array.isArray(record.hands)) throw new Error('翠卓レコードが必要です');
+    const walls = M.tenhouWalls(xml, { rounds: record.hands.length });
+    const rounds = [];
+    let ok = true;
+    record.hands.forEach((hand, index) => {
+      const yama = walls[index];
+      if (!yama) { ok = false; rounds.push({ index, ok: false, errors: ['牌山を再現できませんでした'] }); return; }
+      const config = hand.config || {};
+      const layout = M.tenhouWallLayout(yama, config.dealer);
+      const errors = [];
+      // mjai/mjlog do not preserve the physical copy number, so compare the tile
+      // type and the red-five flag (the red copy is preserved by the importer).
+      const sig = (id) => String(id >> 2) + (T.isRed(id) ? 'r' : '');
+      const sigs = (ids) => ids.map(sig);
+      const sort = (a) => a.slice().sort();
+      const same = (a, b) => JSON.stringify(sort(sigs(a))) === JSON.stringify(sort(sigs(b)));
+      for (let seat = 0; seat < 4; seat++) {
+        if (!same(hand.initialHands[seat], layout.dealt[seat])) errors.push(`座席${seat}の配牌が一致しません`);
+      }
+      const draws = (hand.events || []).filter((e) => e.type === 'draw' && !e.rinshan).map((e) => sig(e.tileId));
+      if (JSON.stringify(draws) !== JSON.stringify(sigs(layout.live.slice(0, draws.length)))) errors.push('生牌山のツモ順が一致しません');
+      const start = (hand.events || []).find((e) => e.type === 'start');
+      let indicators = start && start.doraIndicators ? start.doraIndicators.slice() : [];
+      for (const e of hand.events || []) if (e.type === 'dora') indicators = e.doraIndicators.slice();
+      if (indicators.length && JSON.stringify(sigs(indicators)) !== JSON.stringify(sigs(layout.dora.slice(0, indicators.length)))) errors.push('ドラ表示牌が一致しません');
+      const rinshan = (hand.events || []).filter((e) => e.type === 'draw' && e.rinshan).map((e) => sig(e.tileId));
+      if (rinshan.length && JSON.stringify(rinshan) !== JSON.stringify(sigs(layout.rinshan.slice(0, rinshan.length)))) errors.push('嶺上牌が一致しません');
+      const result = hand.result || ((hand.events || []).filter((e) => e.type === 'end').slice(-1)[0] || {}).result;
+      if (result && Array.isArray(result.uraIndicators) && result.uraIndicators.length &&
+        JSON.stringify(sigs(result.uraIndicators)) !== JSON.stringify(sigs(layout.ura.slice(0, result.uraIndicators.length)))) errors.push('裏ドラ表示牌が一致しません');
+      if (errors.length) ok = false;
+      rounds.push({ index, ok: errors.length === 0, errors, rinshanObserved: rinshan.length });
+    });
+    return { ok, rounds };
   };
 
   function decodeMeld(m) {

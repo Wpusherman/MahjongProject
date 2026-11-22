@@ -2,6 +2,20 @@
   const MJ = globalThis.MJ, T = MJ.tiles, S = MJ.shanten;
   const AI = MJ.ai = { version: 'public-search-4' };
   // Tunable heuristic weights. The defaults reproduce the hand-tuned public-search-4 AI.
+  // Coarse phase timers for tools/evaluate.js --profile. They are only enabled
+  // explicitly; when disabled, timed() adds a single boolean branch.
+  const now = () => (typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now());
+  const PROFILE = { enabled: false, evaluations: 0, shanten: 0, ukeire: 0, shape: 0, scoring: 0, lookahead: 0, risk: 0 };
+  AI.profile = {
+    enable() { PROFILE.enabled = true; }, disable() { PROFILE.enabled = false; },
+    reset() { for (const key of Object.keys(PROFILE)) if (typeof PROFILE[key] === 'number') PROFILE[key] = 0; },
+    snapshot() { return { ...PROFILE }; }
+  };
+  const timed = (key, fn) => {
+    if (!PROFILE.enabled) return fn();
+    const start = now();
+    try { return fn(); } finally { PROFILE[key] += now() - start; }
+  };
   const W = AI.weights = {
     shantenCost: 125, ukeireGain: 1.25, shapeGain: 2.4, grossWeight: 0.035,
     spareFive: 0.38, spareLow: 0.8, headBonus: 3.0, secondPairBonus: 1.4, pairYakuhai: 0.35,
@@ -39,9 +53,10 @@
   };
   // Rank-point pressure: leaders value a point lost more than a point gained,
   // trailers need to push. Without standings information this is neutral.
-  function rankBias(view) {
-    if (!MJ.rank || !Array.isArray(view.scores) || view.scores.length !== 4 || view.handsLeft == null) return 1;
-    try { return MJ.rank.riskBias(view.scores, view.seat, view.rankConfig, { handsLeft: view.handsLeft }); }
+  function rankBias(view, enabled = true) {
+    if (!enabled || !MJ.rank || !Array.isArray(view.scores) || view.scores.length !== 4 || view.handsLeft == null) return 1;
+    try { return MJ.rank.riskBias(view.scores, view.seat, view.rankConfig, { handsLeft: view.handsLeft,
+      honba: view.honba, riichiSticks: view.riichiSticks, handIndex: view.handIndex, dealer: view.dealer }); }
     catch (_) { return 1; }
   }
 
@@ -90,37 +105,60 @@
   function blockShape(counts, view, unseen, w = AI.weights) {
     const c = counts.slice(), groups = [], singles = [], meldCount = view.melds.length;
     let best = null, five = null, six = null;
-    function growth(t) {
-      if (t >= 27) return unseen[t] * w.growthHonor + yakuhai(t, view) * unseen[t] * Math.max(0, unseen[t] - 1) * w.growthHonorPair + (t === view.seatWind ? 0.1 : 0);
-      let value = unseen[t] * w.growthNumber;
-      for (const delta of [-2, -1, 1, 2]) {
-        const x = t + delta;
-        if (x < 0 || x >= 27 || Math.floor(x / 9) !== Math.floor(t / 9)) continue;
-        const low = Math.min(t, x) % 9;
-        value += unseen[x] * (Math.abs(delta) === 2 ? w.growthKabe : low >= 1 && low <= 6 ? w.growthNeighbor : w.growthEdge);
+    // Static tables for this call: growth and pair values depend only on the
+    // public unseen counts, not on the decomposition, so compute them once.
+    const growthValue = new Array(34), pairValue = new Array(34);
+    const yakuhaiValue = new Array(34);
+    for (let t = 0; t < 34; t++) yakuhaiValue[t] = yakuhai(t, view);
+    for (let t = 0; t < 34; t++) {
+      pairValue[t] = unseen[t] * (1.0 + yakuhaiValue[t] * w.pairYakuhai);
+      if (t >= 27) {
+        growthValue[t] = unseen[t] * w.growthHonor + yakuhaiValue[t] * unseen[t] * Math.max(0, unseen[t] - 1) * w.growthHonorPair +
+          (t === view.seatWind ? 0.1 : 0);
+        continue;
       }
-      return value;
+      let value = unseen[t] * w.growthNumber;
+      const n = t % 9, base = t - n;
+      for (const delta of [-2, -1, 1, 2]) {
+        const x = n + delta;
+        if (x < 0 || x > 8) continue;
+        const low = Math.min(n, x);
+        value += unseen[base + x] * (Math.abs(delta) === 2 ? w.growthKabe : low >= 1 && low <= 6 ? w.growthNeighbor : w.growthEdge);
+      }
+      growthValue[t] = value;
     }
+    const taatsuValue = (kind, waits) => {
+      let sum = 0;
+      for (const t of waits) sum += unseen[t];
+      return sum * (kind === 'ryanmen' ? 1 : kind === 'kanchan' ? 0.82 : 0.68);
+    };
     function finish(sets) {
-      const pairs = groups.filter((g) => g.kind === 'pair');
-      const head = pairs.length > 0;
-      const incomplete = groups.filter((g) => g.kind !== 'set');
-      const sh = 8 - 2 * (sets + meldCount) - Math.min(4 - sets - meldCount, incomplete.length - Number(head)) - Number(head);
+      // Count the current groups without allocating filtered arrays.
+      let head = false, pairs = 0, incomplete = 0, ryanmen = 0, weak = 0;
+      const values = [];
+      for (const g of groups) {
+        if (g.kind === 'set') continue;
+        incomplete++;
+        if (g.kind === 'pair') { head = true; pairs++; }
+        else if (g.kind === 'ryanmen') ryanmen++;
+        else weak++;
+        values.push(g.value);
+      }
+      const sh = 8 - 2 * (sets + meldCount) - Math.min(4 - sets - meldCount, incomplete - Number(head)) - Number(head);
       const blocks = groups.length + meldCount;
       let quality = 0;
-      const values = incomplete.map((g) => {
-        if (g.kind === 'pair') return unseen[g.t] * (1.0 + yakuhai(g.t, view) * w.pairYakuhai);
-        return g.waits.reduce((n, t) => n + unseen[t], 0) * (g.kind === 'ryanmen' ? 1 : g.kind === 'kanchan' ? 0.82 : 0.68);
-      }).sort((a, b) => b - a);
-      values.forEach((value, i) => { quality += value * (i < 5 - sets - meldCount ? 1 : 0.12); });
-      const spare = singles.map(growth).sort((a, b) => b - a);
+      values.sort((a, b) => b - a);
+      for (let i = 0; i < values.length; i++) quality += values[i] * (i < 5 - sets - meldCount ? 1 : 0.12);
+      const spare = [];
+      for (const t of singles) spare.push(growthValue[t]);
+      spare.sort((a, b) => b - a);
       // Spare central tiles can replace bad taatsu even at five blocks.
-      spare.forEach((value, i) => { quality += value * (blocks < 5 ? w.spareLow : w.spareFive) / (i + 1); });
+      const spareWeight = blocks < 5 ? w.spareLow : w.spareFive;
+      for (let i = 0; i < spare.length; i++) quality += spare[i] * spareWeight / (i + 1);
       if (head) quality += w.headBonus;
-      if (pairs.length === 2) quality += w.secondPairBonus; // alternative heads / triplet completion
+      if (pairs === 2) quality += w.secondPairBonus; // alternative heads / triplet completion
       const value = -sh * 100 + quality;
-      const plan = { blocks, head, pairs: pairs.length, ryanmen: groups.filter((g) => g.kind === 'ryanmen').length,
-        weak: groups.filter((g) => g.kind === 'penchan' || g.kind === 'kanchan').length, quality, sh, value };
+      const plan = { blocks, head, pairs, ryanmen, weak, quality, sh, value };
       if (blocks === 5 && (!five || value > five.value)) five = plan;
       if (blocks === 6 && (!six || value > six.value)) six = plan;
       if (!best || value > best.value) best = plan;
@@ -131,7 +169,10 @@
       if (groups.length + meldCount > 6 || sets + meldCount > 4) return;
       const t = start, n = t % 9;
       function use(tiles, group, set) {
-        tiles.forEach((x) => c[x]--); groups.push(group); walk(t, sets + Number(set)); groups.pop(); tiles.forEach((x) => c[x]++);
+        tiles.forEach((x) => c[x]--);
+        if (!set) group.value = group.kind === 'pair' ? pairValue[t] : taatsuValue(group.kind, group.waits);
+        groups.push(group); walk(t, sets + Number(set)); groups.pop();
+        tiles.forEach((x) => c[x]++);
       }
       if (c[t] >= 3) use([t, t, t], { kind: 'set' }, true);
       if (t < 27 && n <= 6 && c[t + 1] && c[t + 2]) use([t, t + 1, t + 2], { kind: 'set' }, true);
@@ -207,19 +248,60 @@
     }
     return { route, sh };
   }
-  function routeUkeire(counts, melds, unseen, route) {
-    const base = routeShanten(counts, melds, route);
-    const tiles = []; let total = 0;
-    for (let t = 0; t < 34; t++) {
-      if (counts[t] >= 4 || unseen[t] <= 0) continue;
-      counts[t]++;
-      const s = routeShanten(counts, melds, route);
-      counts[t]--;
-      if (s < base) { tiles.push(t); total += unseen[t]; }
+  // Improving tile TYPES depend on the 13-tile hand and route, not on the
+  // current unseen counts, so the expensive part is cached per hand. For the
+  // standard route only draws within two ranks of a held tile (or pairing a held
+  // tile) can help; isolated tiles cannot change a decomposition.
+  const ukeireCache = new Map();
+  function improvingTiles(counts, melds, route) {
+    const key = route + ':' + melds + ':' + counts.join('');
+    const hit = ukeireCache.get(key);
+    if (hit) return hit;
+    const base = routeShanten(counts, melds, route), tiles = [];
+    if (route === 'chiitoi') {
+      let kinds = 0;
+      for (let t = 0; t < 34; t++) if (counts[t]) kinds++;
+      for (let t = 0; t < 34; t++) if (counts[t] < 4 && (counts[t] === 1 || (counts[t] === 0 && kinds < 7))) tiles.push(t);
+    } else if (route === 'kokushi') {
+      let kinds = 0, pair = 0;
+      for (const t of T.YAOCHU_TYPES) { if (counts[t]) kinds++; if (counts[t] >= 2) pair = 1; }
+      for (const t of T.YAOCHU_TYPES) {
+        if (counts[t] >= 4) continue;
+        if ((counts[t] === 0 && kinds < 13) || (counts[t] === 1 && !pair)) tiles.push(t);
+      }
+    } else {
+      const tryTile = (t) => {
+        counts[t]++;
+        const s = routeShanten(counts, melds, route);
+        counts[t]--;
+        if (s < base) tiles.push(t);
+      };
+      for (let t = 0; t < 34; t++) {
+        if (counts[t] >= 4) continue;
+        let useful = counts[t] > 0;
+        if (!useful && t < 27) {
+          const n = t % 9, from = t - n;
+          for (const d of [-2, -1, 1, 2]) {
+            const x = n + d;
+            if (x >= 0 && x <= 8 && counts[from + x] > 0) { useful = true; break; }
+          }
+        }
+        if (useful) tryTile(t);
+      }
     }
-    return { tiles, count: total, base };
+    if (ukeireCache.size >= 50000) ukeireCache.delete(ukeireCache.keys().next().value);
+    ukeireCache.set(key, tiles);
+    return tiles;
+  }
+  function routeUkeire(counts, melds, unseen, route) {
+    const all = improvingTiles(counts, melds, route), tiles = [];
+    let total = 0;
+    for (const t of all) if (unseen[t] > 0) { tiles.push(t); total += unseen[t]; }
+    return { tiles, count: total, base: routeShanten(counts, melds, route) };
   }
   AI.bestRoute = bestRoute;
+  // Exposed for the ukeire regression test; not part of the policy interface.
+  AI.improvingTiles = improvingTiles;
 
   function handValue(counts, view, redCount) {
     const all = counts.slice();
@@ -270,32 +352,44 @@
     }
     return { winProbability: mass[stages], tenpaiProbability: tenpai };
   }
+  // Shapes depend on the public unseen counts, not on hidden tiles. A small LRU
+  // shared by every evaluator avoids recomputing the same decomposition when the
+  // same hand shape recurs (e.g. after a called tile or in the next seat's turn).
+  const shapeCache = new Map();
+  const SHAPE_CACHE_MAX = 60000;
+  function cachedShape(key, make) {
+    const hit = shapeCache.get(key);
+    if (hit !== undefined) { shapeCache.delete(key); shapeCache.set(key, hit); return hit; }
+    const value = make();
+    if (shapeCache.size >= SHAPE_CACHE_MAX) shapeCache.delete(shapeCache.keys().next().value);
+    shapeCache.set(key, value);
+    return value;
+  }
   function evaluator(view, w = AI.weights) {
-    const cache = new Map(), shapeCache = new Map();
-    return function evaluate(counts, unseen, turns, reds, discarded = [], future) {
+    const cache = new Map();
+    return function evaluate(counts, unseen, turns, reds, discarded = [], future, pre) {
+      PROFILE.evaluations += PROFILE.enabled ? 1 : 0;
       const key = counts.join('') + '/' + unseen.join('') + '/' + turns + '/' + reds + '/' + discarded.join(',') + '/' + future;
       if (cache.has(key)) return cache.get(key);
-      const { route, sh } = bestRoute(counts, view.melds.length);
-      const uk = routeUkeire(counts, view.melds.length, unseen, route);
-      const shapeKey = route + ':' + counts.join('') + '/' + unseen.join('');
-      let shape = shapeCache.get(shapeKey);
-      if (!shape) {
-        if (sh === 0) shape = { quality: 0, blocks: 5, head: counts.some((n) => n === 2), ryanmen: 0, five: 0, six: null };
-        else if (route === 'chiitoi') shape = chiitoiShape(counts, unseen);
-        else if (route === 'kokushi') shape = kokushiShape(counts, unseen);
-        else shape = blockShape(counts, view, unseen, w);
-        shapeCache.set(shapeKey, shape);
-      }
-      const hv = route === 'chiitoi' ? chiitoiValue(counts, view, reds)
+      const { route, sh } = pre || timed('shanten', () => bestRoute(counts, view.melds.length));
+      const uk = pre && pre.ukeire ? pre.ukeire : timed('ukeire', () => routeUkeire(counts, view.melds.length, unseen, route));
+      const shapeKey = route + ':' + counts.join('') + '/' + unseen.join('') + '/' + view.melds.length + '/' + view.seatWind;
+      const shape = cachedShape(shapeKey, () => {
+        if (sh === 0) return { quality: 0, blocks: 5, head: counts.some((n) => n === 2), ryanmen: 0, five: 0, six: null };
+        if (route === 'chiitoi') return chiitoiShape(counts, unseen);
+        if (route === 'kokushi') return kokushiShape(counts, unseen);
+        return timed('shape', () => blockShape(counts, view, unseen, w));
+      });
+      const hv = timed('scoring', () => route === 'chiitoi' ? chiitoiValue(counts, view, reds)
         : route === 'kokushi' ? kokushiValue(view)
-        : handValue(counts, { ...view, unseen }, reds);
+        : handValue(counts, { ...view, unseen }, reds));
       let outs = uk.count, points = hv.points, yakuChance = hv.yakuChance;
       const furiten = sh === 0 && uk.tiles.some((t) => view.ownDiscardTypes.includes(t) || discarded.includes(t));
       if (sh === 0) {
         let gain = 0; outs = 0;
         for (const t of uk.tiles) {
           counts[t]++;
-          const value = winValue(counts, t, view, reds, hv.closed && view.score >= 1000 && view.liveRemaining >= 4);
+          const value = timed('scoring', () => winValue(counts, t, view, reds, hv.closed && view.score >= 1000 && view.liveRemaining >= 4));
           counts[t]--;
           if (value) { outs += unseen[t]; gain += value * unseen[t]; }
         }
@@ -356,17 +450,85 @@
     return { nextScore: score, expectedGross: gross, futureUkeire: future, improvedUkeire: improvedWeight ? improvedUkeire / improvedWeight : 0,
       winProbability: win, tenpaiProbability: tenpai };
   }
-  AI.analyzeDiscard = function (rawView, level = 'strong', w = AI.weights) {
+  // An approximation for discard candidates that are not worth a full shape
+  // decomposition. It keeps the shanten/ukeire/efficiency term but drops the
+  // block-shape bonus and the gross EV. Used only by the evaluation-only fast
+  // profile; the highest-ranked root candidates are still fully evaluated.
+  function cheapValue(pre, unseen, turns, w) {
+    const sh = pre.sh, uk = pre.ukeire;
+    const probs = probability(sh, uk.count, null, sum(unseen), turns);
+    return { sh, ukeire: uk.count, waits: uk.tiles, shape: 0, blocks: 0, route: pre.route,
+      blockPlans: { five: null, six: null, head: false, ryanmen: 0, pairs: 0 }, ...probs,
+      estimatedWinPoints: 0, grossEV: 0, yakuChance: sh === 0 ? 1 : 0.3, furiten: false,
+      score: -sh * w.shantenCost + uk.count * w.ukeireGain, approximated: true };
+  }
+  // Cheap upper bound on acceptance used to rank root candidates before the
+  // exact 34-tile ukeire. It only needs one pass over the counts, not 34 shanten
+  // evaluations. A draw helps if it pairs a held tile or sits within two ranks
+  // of one; for chiitoi/kokushi the route-specific tiles are used instead.
+  function approxAcceptance(counts, unseen, route) {
+    let total = 0;
+    if (route === 'kokushi') {
+      for (const t of T.YAOCHU_TYPES) if (unseen[t] > 0 && counts[t] < 4) total += unseen[t];
+      return total;
+    }
+    if (route === 'chiitoi') {
+      let kinds = 0;
+      for (let t = 0; t < 34; t++) if (counts[t]) kinds++;
+      for (let t = 0; t < 34; t++) if (unseen[t] > 0 && counts[t] < 4 && (counts[t] === 1 || kinds < 7)) total += unseen[t];
+      return total;
+    }
+    for (let t = 0; t < 34; t++) {
+      if (unseen[t] <= 0 || counts[t] >= 4) continue;
+      let useful = counts[t] > 0;
+      if (!useful && t < 27) {
+        const n = t % 9, base = t - n;
+        for (const d of [-2, -1, 1, 2]) {
+          const x = n + d;
+          if (x >= 0 && x <= 8 && counts[base + x] > 0) { useful = true; break; }
+        }
+      }
+      if (useful) total += unseen[t];
+    }
+    return total;
+  }
+  AI.analyzeDiscard = function (rawView, level = 'strong', w = AI.weights, options = {}) {
     AI.assertObservation(rawView);
     const view = normalized(rawView), counts = T.countsFromIds(view.hand), evaluate = evaluator(view, w);
-    const turns = horizon(view), reds = redCount(view), bias = rankBias(view), candidates = [];
+    const turns = horizon(view), reds = redCount(view), bias = rankBias(view, options.rankBias !== false), candidates = [];
     const types = [...new Set((view.legalDiscards || view.hand).filter((id) => !(view.forbidden || []).includes(id >> 2)).map((id) => id >> 2))];
+    // Fast profile: compute the cheap shanten/ukeire for every discard, then run
+    // the full block-shape evaluation only for the best root candidates.
+    const fast = options.fast === true || level === 'fast';
+    const rootLimit = Math.max(1, options.rootCandidates || (fast ? 5 : 4));
+    const cheap = new Map();
+    if (fast) {
+      for (const t of types) {
+        counts[t]--;
+        const sh = timed('shanten', () => bestRoute(counts, view.melds.length));
+        cheap.set(t, { route: sh.route, sh: sh.sh, approx: approxAcceptance(counts, view.unseen, sh.route) });
+        counts[t]++;
+      }
+    }
+    const full = fast
+      ? new Set([...cheap.entries()].sort((a, b) => a[1].sh - b[1].sh || b[1].approx - a[1].approx)
+        .slice(0, rootLimit).map(([t]) => t))
+      : null;
     for (const t of types) {
       const tileId = pickId(view.hand, t, view.drawnTile);
       counts[t]--;
-      const ev = evaluate(counts, view.unseen, turns, reds - Number(T.isRed(tileId)), [t]);
+      let ev;
+      if (fast) {
+        const pre = cheap.get(t);
+        if (full.has(t)) {
+          const ukeire = timed('ukeire', () => routeUkeire(counts, view.melds.length, view.unseen, pre.route));
+          ev = evaluate(counts, view.unseen, turns, reds - Number(T.isRed(tileId)), [t], undefined, { ...pre, ukeire });
+        } else {
+          ev = cheapValue({ route: pre.route, sh: pre.sh, ukeire: { tiles: [], count: pre.approx } }, view.unseen, turns, w);
+        }
+      } else ev = evaluate(counts, view.unseen, turns, reds - Number(T.isRed(tileId)), [t]);
       counts[t]++;
-      const risk = AI.risk(t, view, w);
+      const risk = timed('risk', () => AI.risk(t, view, w));
       const copies = counts[t];
       // Folding with duplicate safer tiles reserves safe exits for later turns.
       const reserve = risk.probability < 0.09 ? Math.max(0, copies - 1) * (1 - risk.probability * 8) * 65 : 0;
@@ -376,14 +538,16 @@
         expectedLoss: round(risk.loss + futureLoss), expectedNet, reserve,
         doraLoss: dora(t, view) + Number(T.isRed(tileId)), score: view.threat ? expectedNet + reserve + ev.score * 0.08 : ev.score });
     }
-    candidates.sort((a, b) => b.score - a.score || b.t - a.t);
-    if (level === 'strong' && turns > 1 && !view.threat) {
+    // In the fast profile the fully evaluated roots stay ahead of the cheap
+    // approximations; otherwise a loose acceptance bound could outrank them.
+    candidates.sort((a, b) => (Number(!!a.approximated) - Number(!!b.approximated)) || b.score - a.score || b.t - a.t);
+    if (level === 'strong' && !fast && turns > 1 && !view.threat) {
       const bestSh = Math.min(...candidates.map((c) => c.sh));
       const beam = candidates.filter((c) => c.sh <= bestSh + 1).slice(0, 4);
       for (const c of beam) {
         if (c.sh === 0) continue;
         counts[c.t]--;
-        const next = lookahead(counts, view, evaluate, turns, reds - Number(T.isRed(c.tileId)), w);
+        const next = timed('lookahead', () => lookahead(counts, view, evaluate, turns, reds - Number(T.isRed(c.tileId)), w));
         counts[c.t]++;
         c.futureUkeire = round(next.futureUkeire);
         c.improvedUkeire = round(next.improvedUkeire);
@@ -407,15 +571,16 @@
     }
     return out;
   }
-  AI.analyzeCall = function (rawView, options, w = AI.weights) {
+  AI.analyzeCall = function (rawView, callOptions, w = AI.weights, options = {}) {
     AI.assertObservation(rawView);
-    const view = normalized(rawView), turns = horizon(view), ev = evaluator(view, w), bias = rankBias(view);
+    const opts = callOptions;
+    const view = normalized(rawView), turns = horizon(view), ev = evaluator(view, w), bias = rankBias(view, options.rankBias !== false);
     const counts = T.countsFromIds(view.hand), pass = ev(counts, view.unseen, turns, redCount(view));
     const alternatives = [{ action: null, label: '見送り', sh: pass.sh, ukeire: pass.ukeire, expectedNet: round(pass.grossEV), winProbability: pass.winProbability }];
     const actions = [];
-    if (options.pon != null) actions.push({ type: 'pon', tile: options.tile });
-    for (const pair of options.chi || []) actions.push({ type: 'chi', tile: options.tile, tiles: pair });
-    if (options.kan != null) actions.push({ type: 'kan', tile: options.tile });
+    if (opts.pon != null) actions.push({ type: 'pon', tile: opts.tile });
+    for (const pair of opts.chi || []) actions.push({ type: 'chi', tile: opts.tile, tiles: pair });
+    if (opts.kan != null) actions.push({ type: 'kan', tile: opts.tile });
     for (const action of actions) {
       const hand = view.hand.slice(), used = [];
       const needed = action.type === 'chi' ? action.tiles : Array(action.type === 'kan' ? 3 : 2).fill(action.tile);
@@ -430,7 +595,7 @@
         const next = lookahead(T.countsFromIds(hand), v, evaluator(v, w), turns, redCount(v), w);
         result = { sh: bestRoute(T.countsFromIds(hand), v.melds.length).sh, ukeire: next.futureUkeire,
           expectedNet: next.expectedGross - (view.threat ? 500 : 120), winProbability: next.winProbability };
-      } else result = AI.analyzeDiscard(v, 'standard', w).candidates[0];
+      } else result = AI.analyzeDiscard(v, 'standard', w, { rankBias: options.rankBias !== false }).candidates[0];
       if (!result) continue;
       // Fewer concealed tiles also reduce future defensive exits.
       const defenseCost = view.threat ? (w.callDefense + 80 * v.melds.length) * bias : 0;
@@ -450,23 +615,27 @@
   };
   AI.create = function (seat, opts = {}) {
     const weights = opts.weights ? { ...AI.weights, ...opts.weights } : AI.weights;
+    const useRankBias = opts.rankBias !== false;
+    const fast = opts.fast === true || opts.level === 'fast';
     return {
       seat, weights, lastCallAnalysis: null,
       async wantTsumo() { return true; },
       async chooseDiscard(view) {
         AI.assertObservation(view);
         if (view.riichi) return { tileId: view.drawnTile, riichi: false, analysis: { version: AI.version, forced: true } };
-        const analysis = AI.analyzeDiscard(view, opts.level || 'strong', weights), best = analysis.candidates[0];
-        const margin = weights.pushMargin * rankBias(view);
+        const analysis = AI.analyzeDiscard(view, opts.level || 'strong', weights,
+          { rankBias: useRankBias, fast, rootCandidates: opts.rootCandidates }), best = analysis.candidates[0];
+        const margin = weights.pushMargin * rankBias(view, useRankBias);
         const riichi = view.menzen && best.sh === 0 && !best.furiten && view.score >= 1000 && view.liveRemaining >= 4 && (!view.threat || best.expectedNet > margin);
         return { tileId: best.tileId, riichi, analysis };
       },
       async wantCall(view, options) {
         AI.assertObservation(view);
         this.lastCallAnalysis = null;
+        if (!options || (!options.ron && options.pon == null && options.kan == null && !(options.chi || []).length)) return null;
         if (options.ron) return { type: 'ron' };
         if (view.riichi) return null;
-        this.lastCallAnalysis = AI.analyzeCall(view, options, weights);
+        this.lastCallAnalysis = AI.analyzeCall(view, options, weights, { rankBias: useRankBias });
         return this.lastCallAnalysis.selected;
       },
       async wantKan(view, kans) {

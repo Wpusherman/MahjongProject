@@ -23,6 +23,11 @@ function game() {
     assert.equal(obs.opponents.reduce((n, o) => n + o.handCount, 0), 39, 'opponent counts add up');
   }
 
+  const ranked = new MJ.Game({ agents: [0, 1, 2, 3].map(MJ.ai.create) });
+  ranked.setup({ roundWind: 27, dealer: 0, scores: [25000, 25000, 25000, 25000], rankConfig: 'raw',
+    wall: Array.from({ length: 136 }, (_, i) => i) });
+  assert.equal(ranked.getObservation(0).rankConfig, 'raw', 'the observation carries the rank config for rank EV');
+
   // A concealed kan reveals the tile type but not which physical copy is the red five.
   const k = game(), owner = k.players[0];
   owner.melds = [{ kind: 'kan', type: 4, open: false, tiles: [16, 17, 18, 19] }];

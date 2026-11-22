@@ -85,6 +85,7 @@
       },
       wantCall(view, options) {
         this.lastCallAnalysis = null;
+        if (!options) return Promise.resolve(null);
         core._pend(seat, 'call', view, callActions(options));
         return core._deferred();
       },

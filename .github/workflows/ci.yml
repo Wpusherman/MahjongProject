@@ -1,0 +1,70 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 18 * * *'
+
+jobs:
+  node:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm test
+
+  nightly-full:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:full
+
+  rust-core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --manifest-path rust/Cargo.toml
+      - run: cargo build --manifest-path rust/Cargo.toml --release
+
+  python-tools:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install numpy pyarrow onnx
+      - name: GRP dataset and training (smoke)
+        run: |
+          node tools/grp-dataset.js "Saved Data" --out "$RUNNER_TEMP/grp.jsonl"
+          python tools/grp/train_grp.py --train "$RUNNER_TEMP/grp.jsonl" --out-dir "$RUNNER_TEMP/grp-model" --epochs 20 --hidden 16,16
+          node tools/evaluate.js --seeds 2 --workers 2 --match tonpu --grp "$RUNNER_TEMP/grp-model/grp.json"
+      - name: Features to Parquet (smoke)
+        run: |
+          node tools/features.js "Saved Data/suitaku-2026-10-13T09-48-02-146Z.json" "$RUNNER_TEMP/features.jsonl" --limit 200
+          python tools/to_parquet.py "$RUNNER_TEMP/features.jsonl" --out "$RUNNER_TEMP/parquet" --shard-size 100
+          python -c "import glob, os, pyarrow.parquet as pq; files=glob.glob(os.environ['RUNNER_TEMP']+'/parquet/*.parquet'); assert files; rows=sum(pq.read_table(f).num_rows for f in files); print('parquet rows', rows); assert rows == 200"
+      - name: mjai smoke
+        run: |
+          node tools/mjai-convert.js to-mjai "Saved Data/suitaku-2026-10-12T20-33-19-457Z.json" "$RUNNER_TEMP/out.jsonl"
+          node tools/mjai-smoke.js "$RUNNER_TEMP/out.jsonl"
+          node tools/mjai-convert.js to-mjai "Saved Data/suitaku-2026-10-12T20-33-19-457Z.json" "$RUNNER_TEMP/seat0.jsonl" --seat 0 --mask-other-draws
+          node tools/mjai-smoke.js "$RUNNER_TEMP/seat0.jsonl"

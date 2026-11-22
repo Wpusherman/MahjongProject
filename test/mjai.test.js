@@ -27,6 +27,8 @@ async function makeRecord(seeds) {
   assert.deepEqual(M.parseTile('0p'), { type: 13, red: true });
   assert.deepEqual(M.parseTile('E'), { type: 27, red: false });
 
+  assert.equal(M.tenhouSeed('<SHUFFLE seed="mt19937ar-sha512-n288-base64,ABC123"/>'), 'ABC123');
+  assert.throws(() => M.tenhouSeed('<mjloggm></mjloggm>'), /SHUFFLE/);
   const pon = M.decodeTenhouMeld(10794);
   assert.equal(pon.kind, 'pon'); assert.equal(pon.from, 2);
   assert.deepEqual(pon.tiles.map((id) => id >> 2), [7, 7, 7]);
@@ -38,6 +40,13 @@ async function makeRecord(seeds) {
   const record = await makeRecord([20261015, 1, 2]);
   const events = M.fromSuitaku(record);
   assert(M.parse(M.stringify(events)).length === events.length, 'JSON Lines round-trip');
+  // Seat-view learning data can hide every other seat's tsumo tile.
+  const maskedDraws = M.fromSuitaku(record, { seat: 0, maskOtherDraws: true });
+  const tsumoEvents = maskedDraws.filter((e) => e.type === 'tsumo');
+  assert(tsumoEvents.length > 0);
+  assert(tsumoEvents.filter((e) => e.actor !== 0).every((e) => e.pai === '?'), 'opponent tsumo tiles are masked');
+  assert(tsumoEvents.filter((e) => e.actor === 0).every((e) => e.pai !== '?'), 'own tsumo tiles stay visible');
+  assert(M.fromSuitaku(record).filter((e) => e.type === 'tsumo').every((e) => e.pai !== '?'), 'masking is opt-in');
   assert(events.some((e) => ['chi', 'pon', 'daiminkan', 'ankan', 'kakan'].includes(e.type)), 'the sample covers calls');
   const back = M.toSuitaku(events, { createdAt: '2026-01-01T00:00:00.000Z' });
   const again = M.toSuitaku(events, { createdAt: '2026-01-01T00:00:00.000Z' });
@@ -92,12 +101,21 @@ async function makeRecord(seeds) {
   assert(tenhouEvents.some((e) => e.type === 'hora'));
   assert.equal(tenhouEvents[tenhouEvents.length - 1].type, 'end_game');
   const tenhouRecord = M.toSuitaku(tenhouEvents, { createdAt: '2026-01-01T00:00:00.000Z' });
+  // Pao, nine terminals and nagashi mangan are flagged as rule differences.
+  const paoEvents = tenhouEvents.map((e) => e.type === 'hora' ? { ...e, paoWho: 2 } : e);
+  const paoRecord = M.toSuitaku(paoEvents);
+  assert(paoRecord.mjai.flags.includes('pao'));
+  assert.equal(paoRecord.hands[0].result.paoWho, 2);
+  assert.throws(() => M.toSuitaku(paoEvents, { strict: true }), /包/);
   assert.equal(tenhouRecord.mode, 'hanchan');
-  assert.deepEqual(tenhouRecord.hands[0].finalScores, [26000, 24700, 24700, 24600]);
+  assert.deepEqual(tenhouRecord.hands[0].finalScores, [27000, 24400, 24400, 24200]);
   assert.equal(tenhouRecord.hands[0].result.type, 'win');
   assert.equal(tenhouRecord.hands[0].result.winner, 0);
   assert.equal(tenhouRecord.hands[0].result.tsumo, true);
   assert(M.validate(tenhouRecord).ok);
+  assert.equal(tenhouRecord.mjai.tenhou.returnScore, 30000, 'Tenhou 30000-point return is recorded');
+  assert.equal(tenhouRecord.rules.returnScore, 30000);
+  assert.deepEqual(tenhouRecord.mjai.tenhou.rankConfig.uma, [90, 45, 0, -135]);
 
   // A Tenhou pon code: who=1, type 4m, from seat 3 (kamicha), called copy 12.
   const xmlPon = `<mjloggm ver="2.3">
@@ -116,5 +134,48 @@ async function makeRecord(seeds) {
   assert(M.validate(ponRecord).ok);
   assert.equal(ponRecord.hands[0].result.winner, 2);
 
-  console.log('mjai OK: tile notation, Tenhou meld decode, 翠卓↔mjai round-trip (calls/riichi/wins), mjlog replay, rule flags');
+  for (const [type, flag, pattern] of [['yao9', 'nine_terminals', /九種九牌/], ['nm', 'nagashi_mangan', /流し満貫/]]) {
+    const xmlDraw = `<mjloggm ver="2.3">
+<GO type="169"/><TAIKYOKU oya="0"/>
+<INIT seed="0,0,0,1,2,121" ten="250,250,250,250" oya="0" hai0="0,1,2,3,4,5,6,7,8,9,10,11,12" hai1="13,14,15,16,17,18,19,20,21,22,23,24,25" hai2="26,27,28,29,30,31,32,33,34,35,36,37,38" hai3="39,40,41,42,43,44,45,46,47,48,49,50,51"/>
+<RYUUKYOKU type="${type}" sc="250,0,250,0,250,0,250,0" hai0="0" hai1="13"/>
+</mjloggm>`;
+    const drawRecord = M.toSuitaku(M.fromTenhou(xmlDraw));
+    assert(drawRecord.mjai.flags.includes(flag), flag + ' is flagged');
+    assert.throws(() => M.toSuitaku(M.fromTenhou(xmlDraw), { strict: true }), pattern);
+  }
+
+  // Wall layout: dead wall at the head, initial deal from the tail, dora at 5,
+  // ura at 4. Physical copy numbers are not preserved, so signatures compare type+red.
+  const yama = Array.from({ length: 136 }, (_, i) => (i * 37 + 11) % 136);
+  const seen = new Set(yama); assert.equal(seen.size, 136);
+  const layout = M.tenhouWallLayout(yama, 1);
+  assert(layout.dealt.every((h) => h.length === 13));
+  assert.equal(layout.live.length, 70);
+  assert.equal(layout.rinshan.length, 4);
+  assert.deepEqual(layout.dora, [5, 7, 9, 11, 13].map((i) => yama[i]));
+  assert.deepEqual(layout.ura, [4, 6, 8, 10, 12].map((i) => yama[i]));
+  const fake = { hands: [{
+    config: { dealer: 1 }, initialHands: layout.dealt.map((h) => h.slice().sort((a, b) => a - b)),
+    events: [
+      { index: 0, type: 'start', doraIndicators: [layout.dora[0]] },
+      ...layout.live.slice(0, 5).map((tileId, i) => ({ index: i + 1, type: 'draw', seat: i % 4, tileId })),
+      { index: 6, type: 'draw', seat: 1, tileId: layout.rinshan[0], rinshan: true },
+      { index: 7, type: 'dora', doraIndicators: layout.dora.slice(0, 2) },
+      { index: 8, type: 'end', scores: [25000, 25000, 25000, 25000], result: { type: 'win', uraIndicators: layout.ura.slice(0, 1) } }
+    ],
+    result: { type: 'win', uraIndicators: layout.ura.slice(0, 1) }
+  }] };
+  const originalWalls = M.tenhouWalls;
+  M.tenhouWalls = () => [yama];
+  try {
+    const verified = M.verifyTenhouWall('<mjloggm><SHUFFLE seed="x"/></mjloggm>', fake);
+    assert(verified.ok, JSON.stringify(verified.rounds));
+    fake.hands[0].initialHands[0][0] = (fake.hands[0].initialHands[0][0] + 4) % 136;
+    const broken = M.verifyTenhouWall('<mjloggm><SHUFFLE seed="x"/></mjloggm>', fake);
+    assert.equal(broken.ok, false);
+    assert(broken.rounds[0].errors.some((e) => e.includes('配牌')));
+  } finally { M.tenhouWalls = originalWalls; }
+
+  console.log('mjai OK: tile notation, Tenhou meld decode, 翠卓↔mjai round-trip (calls/riichi/wins), mjlog replay, rule flags, wall layout');
 })().catch((error) => { console.error(error); process.exit(1); });

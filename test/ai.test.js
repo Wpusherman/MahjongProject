@@ -68,6 +68,11 @@ function view(text, extra = {}) {
   const leader = MJ.ai.analyzeDiscard({ ...rankView, scores: [5000, 25000, 20000, 60000] }, 'standard');
   assert(trailer.rankBias < 1, 'a trailer accepts more risk');
   assert(leader.rankBias > 1, 'a leader protects the lead');
+  const legacy = MJ.ai.analyzeDiscard(rankView, 'standard', MJ.ai.weights, { rankBias: false });
+  assert.equal(legacy.rankBias, 1, 'rank-point pressure can be disabled for the legacy baseline');
+  const legacyAgent = MJ.ai.create(3, { rankBias: false });
+  const legacyDecision = await legacyAgent.chooseDiscard(rankView);
+  assert.equal(legacyDecision.analysis.rankBias, 1, 'the per-agent switch reaches chooseDiscard');
   const defaults = JSON.stringify(MJ.ai.weights);
   const base = await ai.chooseDiscard(view('1589m38p36s113356z'));
   const heavy = await MJ.ai.create(1, { weights: { ...MJ.ai.weights, shapeGain: 10 } }).chooseDiscard(view('1589m38p36s113356z'));

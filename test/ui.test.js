@@ -3,6 +3,11 @@ const assert = require('node:assert/strict');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 
+// --fast is the smoke subset used by `npm test`: initial render, hidden-hand
+// masking, river layout and responsive width. `npm run test:full` plays a full
+// hanchan and exercises export/import/review as well.
+const FAST = process.argv.includes('--fast');
+
 (async () => {
   const browser = await chromium.launch();
   try {
@@ -18,6 +23,19 @@ const { pathToFileURL } = require('node:url');
     assert.equal(await page.locator('#seat-0 .hand-row > :first-child.drawn').count(), 1);
     // The raw game object is not reachable from the console in the built page.
     assert.equal(await page.evaluate(() => MJ.ui.game), null);
+    // While the match is running the public record is already masked.
+    assert.equal(await page.evaluate(() => MJ.ui.record.redacted), true);
+    assert.equal(await page.evaluate(() => JSON.stringify(MJ.ui.record).includes('"wall"')), false);
+    // The log / aria-live / toast regions must not mention an opponent's hand.
+    const hiddenText = await page.evaluate(() => {
+      window.__SUITAKU_DEBUG__ = true;
+      const labels = new Set();
+      for (let seat = 1; seat < 4; seat++) for (const id of MJ.ui.game.players[seat].hand) labels.add(MJ.tiles.label(id >> 2));
+      const log = [...document.querySelectorAll('#log > div')].filter((n) => !n.textContent.startsWith('──')).map((n) => n.textContent).join('\n');
+      const text = log + '\n' + document.querySelector('#toast').textContent;
+      return [...labels].filter((label) => text.includes(label));
+    });
+    assert.deepEqual(hiddenText, [], 'the visible log must not name an opponent tile');
     // Opponent hands must be opaque in the DOM: no suit, honor, red or tile-name metadata.
     for (let seat = 1; seat < 4; seat++) {
       const tiles = await page.locator(`#seat-${seat} .hand-row .tile`).evaluateAll((nodes) => nodes.map((n) => ({
@@ -61,6 +79,11 @@ const { pathToFileURL } = require('node:url');
     await page.screenshot({ path: path.resolve(__dirname, '../test-results/table-mobile.png'), fullPage: true });
     assert(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
     await page.setViewportSize({ width: 1440, height: 1100 });
+    if (FAST) {
+      assert.deepEqual(errors, []);
+      console.log('Browser UI fast OK: desktop/mobile, font, river layout, hidden hands');
+      return;
+    }
     // New match cancellation while a human decision is pending must not leak the old game loop.
     await page.getByRole('button', { name: '新規対局', exact: true }).click();
     await page.locator('#overlay').getByRole('button', { name: '新規対局', exact: true }).click();

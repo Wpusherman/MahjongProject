@@ -1,0 +1,11 @@
+[package]
+name = "suitaku-core"
+version = "0.1.0"
+edition = "2021"
+description = "Rust core skeleton for the 翠卓 JS engine"
+
+[lib]
+path = "src/lib.rs"
+
+[dev-dependencies]
+serde_json = "1"
