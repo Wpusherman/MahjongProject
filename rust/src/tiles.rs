@@ -13,7 +13,7 @@ pub fn is_yaochu(t: u8) -> bool {
 }
 
 pub fn is_simple(t: u8) -> bool {
-    t < 27 && t % 9 != 0 && t % 9 != 8
+    t < 27 && !t.is_multiple_of(9) && t % 9 != 8
 }
 
 pub fn tile_type(id: u8) -> u8 {

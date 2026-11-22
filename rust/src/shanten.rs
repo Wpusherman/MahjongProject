@@ -15,7 +15,15 @@ fn standard(counts: &[u8; 34], open_sets: i32) -> i32 {
     min
 }
 
-fn dfs(c: &mut [u8; 34], idx: usize, sets: i32, taatsu: i32, pair: i32, open_sets: i32, min: &mut i32) {
+fn dfs(
+    c: &mut [u8; 34],
+    idx: usize,
+    sets: i32,
+    taatsu: i32,
+    pair: i32,
+    open_sets: i32,
+    min: &mut i32,
+) {
     let mut i = idx;
     while i < 34 && c[i] == 0 {
         i += 1;

@@ -1,12 +1,64 @@
 //! Win-shape detection, ported from `src/agari.js`.
 //!
-//! A hand is complete when the shanten number is negative (standard form,
-//! seven pairs or thirteen orphans). This mirrors the JS engine's acceptance.
+//! A hand is complete when the 14 concealed tiles (or 14 - 3*melds when there
+//! are open melds) decompose into exactly `4 - melds` sets plus one pair.
+//! Seven pairs and thirteen orphans are only possible with no open melds.
 
-use crate::shanten;
+fn can_form_sets(c: &mut [u8; 34], needed: i32) -> bool {
+    let mut t = 0;
+    while t < 34 && c[t] == 0 {
+        t += 1;
+    }
+    if t >= 34 {
+        return needed == 0;
+    }
+    if needed <= 0 {
+        return false;
+    }
+    if c[t] >= 3 {
+        c[t] -= 3;
+        if can_form_sets(c, needed - 1) {
+            c[t] += 3;
+            return true;
+        }
+        c[t] += 3;
+    }
+    if t < 27 && t % 9 <= 6 && c[t + 1] > 0 && c[t + 2] > 0 {
+        c[t] -= 1;
+        c[t + 1] -= 1;
+        c[t + 2] -= 1;
+        if can_form_sets(c, needed - 1) {
+            c[t] += 1;
+            c[t + 1] += 1;
+            c[t + 2] += 1;
+            return true;
+        }
+        c[t] += 1;
+        c[t + 1] += 1;
+        c[t + 2] += 1;
+    }
+    false
+}
 
 pub fn is_agari(counts: &[u8; 34], melds: u8) -> bool {
-    shanten::shanten(counts, melds) < 0
+    if is_chiitoi(counts, melds) || is_kokushi(counts, melds) {
+        return true;
+    }
+    if melds > 4 {
+        return false;
+    }
+    let needed = 4 - melds as i32;
+    for pair in 0..34 {
+        if counts[pair] < 2 {
+            continue;
+        }
+        let mut c = *counts;
+        c[pair] -= 2;
+        if can_form_sets(&mut c, needed) {
+            return true;
+        }
+    }
+    false
 }
 
 pub fn is_chiitoi(counts: &[u8; 34], melds: u8) -> bool {

@@ -35,7 +35,7 @@ const rows = [];
 const push = (counts, melds) => rows.push({ c: counts, m: melds, s: MJ.shanten.shanten(counts, melds), a: MJ.agari.isAgari(counts, melds) });
 // Fixed cases: complete, tenpai, chiitoi, kokushi, open melds.
 for (const [text, melds] of [['123456789m123p11s', 0], ['123456789m12p11s', 0], ['1122334455667m', 0],
-  ['19m19p19s1234567z', 0], ['19m19p19s1234567z1z', 0], ['123m456p789s11z22z', 1],
+  ['19m19p19s1234567z', 0], ['19m19p19s1234567z1z', 0], ['456p789s111z22z', 1],
   ['11223344556677m', 0], ['123456789m123p1s', 0]]) push(countsFrom(text), melds);
 
 let seed = 20261122;

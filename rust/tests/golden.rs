@@ -16,8 +16,14 @@ fn golden_files_are_well_formed() {
         }
         let text = fs::read_to_string(&path).expect("read golden file");
         let value: serde_json::Value = serde_json::from_str(&text).expect("parse golden JSON");
-        assert!(value.get("actions").expect("actions").is_array(), "actions must be an array");
-        assert!(value.get("events").expect("events").is_array(), "events must be an array");
+        assert!(
+            value.get("actions").expect("actions").is_array(),
+            "actions must be an array"
+        );
+        assert!(
+            value.get("events").expect("events").is_array(),
+            "events must be an array"
+        );
         assert!(value.get("config").is_some(), "config is required");
         count += 1;
     }
@@ -28,10 +34,16 @@ fn golden_files_are_well_formed() {
 /// `src/agari.js` (`node tools/shanten-golden.js`).
 #[test]
 fn shanten_and_agari_match_the_js_golden() {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/shanten.json");
-    let text = fs::read_to_string(&path).expect("run node tools/shanten-golden.js first");
+    let text = fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/golden/shanten.json"
+    ))
+    .expect("tests/golden/shanten.json is missing (run node tools/shanten-golden.js)");
     let value: serde_json::Value = serde_json::from_str(&text).expect("parse shanten golden");
-    let hands = value.get("hands").and_then(|v| v.as_array()).expect("hands array");
+    let hands = value
+        .get("hands")
+        .and_then(|v| v.as_array())
+        .expect("hands array");
     assert!(hands.len() > 1000, "golden set is too small");
     for (index, row) in hands.iter().enumerate() {
         let vector = row.get("c").and_then(|v| v.as_array()).expect("counts");
@@ -43,7 +55,11 @@ fn shanten_and_agari_match_the_js_golden() {
         let melds = row.get("m").and_then(|v| v.as_u64()).expect("melds") as u8;
         let expected_shanten = row.get("s").and_then(|v| v.as_i64()).expect("shanten") as i8;
         let expected_agari = row.get("a").and_then(|v| v.as_bool()).expect("agari");
-        assert_eq!(shanten::shanten(&counts, melds), expected_shanten, "hand {index}: shanten");
-        assert_eq!(agari::is_agari(&counts, melds), expected_agari, "hand {index}: agari");
+        let got_shanten = shanten::shanten(&counts, melds);
+        assert_eq!(got_shanten, expected_shanten,
+            "hand {index}: shanten mismatch counts={counts:?} melds={melds} js={expected_shanten} rust={got_shanten}");
+        let got_agari = agari::is_agari(&counts, melds);
+        assert_eq!(got_agari, expected_agari,
+            "hand {index}: agari mismatch counts={counts:?} melds={melds} js={expected_agari} rust={got_agari}");
     }
 }

@@ -12,7 +12,7 @@ jobs:
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -25,7 +25,7 @@ jobs:
     if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -37,15 +37,22 @@ jobs:
   rust-core:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+      - run: cargo fmt --manifest-path rust/Cargo.toml --check
+      - run: cargo clippy --manifest-path rust/Cargo.toml --all-targets -- -D warnings
       - run: cargo test --manifest-path rust/Cargo.toml
       - run: cargo build --manifest-path rust/Cargo.toml --release
 
   python-tools:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: actions/setup-node@v4
         with:
           node-version: 22

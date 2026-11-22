@@ -49,7 +49,12 @@ pub fn compute(han: u8, fu: u8, tsumo: bool, dealer: bool) -> Score {
     } else {
         round_up_100(base * 4)
     };
-    Score { han, fu, base, points }
+    Score {
+        han,
+        fu,
+        base,
+        points,
+    }
 }
 
 #[cfg(test)]

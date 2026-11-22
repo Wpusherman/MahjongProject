@@ -3,3 +3,7 @@ test-results/
 playwright-report/
 weights.json
 weights-*.json
+
+rust/target/
+__pycache__/
+*.pyc
