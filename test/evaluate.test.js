@@ -72,6 +72,16 @@ const MJ = globalThis.MJ, E = MJ.evaluate;
   assert.equal(delta.mean, 10);
   assert.equal(delta.n, 20);
 
+  // Same-observation counterfactual wiring: identical policies diverge 0%,
+  // a deliberate weight change must produce a non-zero rate.
+  const sameDivergence = E.summarize(await E.runSeeds({ seeds: 1, seed: 3, divergence: true }));
+  assert(sameDivergence.actionDivergence.decisions > 0, 'divergence observes decisions');
+  assert.equal(sameDivergence.actionDivergence.rate, 0, 'identical policies choose the same action');
+  const changed = E.summarize(await E.runSeeds({ seeds: 1, seed: 3, divergence: true,
+    candidateWeights: { ...MJ.ai.weights, shapeGain: 10 } }));
+  assert(changed.actionDivergence.decisions > 0);
+  assert(changed.actionDivergence.rate > 0, 'different weights diverge on some position');
+
   // The same seed and policy are deterministic.
   const a = await E.runSeed({ seed: 7, level: 'standard', rankConfig: 'tenhou' });
   const b = await E.runSeed({ seed: 7, level: 'standard', rankConfig: 'tenhou' });

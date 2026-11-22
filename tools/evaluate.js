@@ -32,6 +32,7 @@ function parseArgs(argv) {
     if (key === '--candidate-no-rank-bias') { args.candidateNoRankBias = true; continue; }
     if (key === '--baseline-no-rank-bias') { args.baselineNoRankBias = true; continue; }
     if (key === '--profile') { args.profile = true; continue; }
+    if (key === '--divergence') { args.divergence = true; continue; }
     if (key === '--fast') { args.level = 'fast'; continue; }
     if (key === '--effect') { args.effects = argv[++i].split(',').map(Number).filter((n) => n > 0); continue; }
     if (key === '--root-candidates') { args.rootCandidates = Number(argv[++i]); continue; }
@@ -110,6 +111,7 @@ const usage = [
   '  --dealer N           fixed dealer seat (default: seed-dependent)',
   '  --control            also run baseline-vs-baseline and report paired delta',
   '  --profile            per-hand phase timings (shanten, ukeire, shape, scoring, lookahead)',
+  '  --divergence         same-observation action divergence between candidate and baseline',
   '  --out FILE           write a JSON report',
   '  --help'
 ].join('\n');
@@ -168,7 +170,7 @@ async function evaluate(params) {
     initialScores: Array.isArray(args.initialScores) && args.initialScores.length === 4 && args.initialScores.every(Number.isFinite)
       ? args.initialScores : null,
     startStates, rootCandidates: Number.isFinite(args.rootCandidates) ? args.rootCandidates : undefined,
-    grpModel, candidateRankModel, baselineRankModel, profile: !!args.profile,
+    grpModel, candidateRankModel, baselineRankModel, profile: !!args.profile, divergence: !!args.divergence,
     dealer: Number.isFinite(args.dealer) ? args.dealer : undefined };
   const seatsPerSeed = common.candidateSeatMode === 'rotate' ? 4 : 1;
   console.log(`evaluating ${args.seeds} seeds (${args.seeds * seatsPerSeed} games), workers=${args.workers}, match=${common.matchMode || 'single-hand'}, seat=${common.candidateSeatMode}, scores=${startStates ? 'start-states:' + startStates.length : common.initialScores ? 'custom' : common.scorePattern}, level=${common.candidateLevel}/${common.baselineLevel}, rankBias=${common.candidateRankBias}/${common.baselineRankBias}`);
@@ -198,7 +200,7 @@ async function evaluate(params) {
       candidateSeat: common.candidateSeatMode,
       scorePattern: startStates ? 'start-states' : common.initialScores ? 'custom' : common.scorePattern,
       startStates: startStates ? startStates.length : 0,
-      candidateLevel: common.candidateLevel, baselineLevel: common.baselineLevel,
+      candidateLevel: common.candidateLevel, baselineLevel: common.baselineLevel, divergence: common.divergence,
       candidate: args.candidate || 'built-in', baseline: args.baseline || 'built-in', control: !!args.control,
       grp: args.grp || null, candidateGrp: args.candidateGrp || null,
       baselineGrp: args.baselineHeuristic ? 'heuristic' : args.baselineGrp || null,

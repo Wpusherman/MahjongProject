@@ -53,6 +53,36 @@
         rankModel: seat === candidateSeat ? options.candidateRankModel : options.baselineRankModel,
         rankBias: seat === candidateSeat ? options.candidateRankBias !== false : options.baselineRankBias !== false
       }));
+      // Same-position counterfactual: ask the baseline policy on exactly the
+      // observation the candidate saw. A rate of 0 with different policies is a
+      // wiring bug, not evidence of equal strength.
+      let decisions = 0, diverged = 0;
+      if (options.divergence) {
+        const probe = MJ.ai.create(candidateSeat, { level: baselineLevel, weights: baselineWeights,
+          rootCandidates: options.rootCandidates, rankModel: options.baselineRankModel,
+          rankBias: options.baselineRankBias !== false });
+        const candidate = agents[candidateSeat];
+        const choose = candidate.chooseDiscard.bind(candidate);
+        candidate.chooseDiscard = async (view) => {
+          const chosen = await choose(view);
+          const other = await probe.chooseDiscard(view);
+          decisions++;
+          if (chosen.tileId !== other.tileId || !!chosen.riichi !== !!other.riichi) diverged++;
+          return chosen;
+        };
+        const wantCall = candidate.wantCall.bind(candidate);
+        candidate.wantCall = async (view, opts) => {
+          const chosen = await wantCall(view, opts);
+          if (opts && (opts.ron || opts.pon != null || opts.kan != null || (opts.chi || []).length)) {
+            const other = await probe.wantCall(view, opts);
+            decisions++;
+            const key = (action) => !action ? 'pass'
+              : [action.type, action.tile == null ? '' : action.tile, (action.tiles || []).slice().sort((a, b) => a - b).join('.')].join(':');
+            if (key(chosen) !== key(other)) diverged++;
+          }
+          return chosen;
+        };
+      }
       const rng = MJ.core.rng(seed);
       // Rank-point pressure is inactive when all four seats start equal. A
       // rotating handicap gives every seed a different standing while keeping
@@ -105,6 +135,7 @@
         scores: scores.slice(), startScores: baseScores.slice(),
         scoreDelta: scores[candidateSeat] - baseScores[candidateSeat], win, tsumoWin, ronWin, dealIn, deals,
         called: calls > 0, riichi: riichis > 0, calls, riichis, result: result && result.type,
+        divergence: options.divergence ? { decisions, diverged } : null,
         startState: startState ? { handIndex: startHand, dealer: startDealer, honba: startHonba, riichiSticks: startSticks } : null });
     }
     return rows;
@@ -128,8 +159,16 @@
     const bySeedPlacement = [...seedGroups.values()].map((group) => group.reduce((n, r) => n + r.rank, 0) / group.length);
     const distribution = [0, 0, 0, 0];
     for (const row of rows) distribution[row.rank - 1]++;
+    const divergence = rows.reduce((total, row) => {
+      if (!row.divergence) return total;
+      total.decisions += row.divergence.decisions;
+      total.diverged += row.divergence.diverged;
+      return total;
+    }, { decisions: 0, diverged: 0 });
     return {
       version: E.version, games, seeds: seedGroups.size, gamesPerSeed: seedGroups.size ? games / seedGroups.size : 0,
+      actionDivergence: { decisions: divergence.decisions, diverged: divergence.diverged,
+        rate: divergence.decisions ? divergence.diverged / divergence.decisions : null },
       avgRankPoints: stats(rows.map((r) => r.points)),
       avgPlacement: stats(rows.map((r) => r.rank)),
       avgScoreDelta: stats(rows.map((r) => r.scoreDelta)),
@@ -188,6 +227,9 @@
       `rank distribution: ${report.rankDistribution.map((r, i) => `${i + 1}位 ${pct(r.rate)}`).join(' / ')}`,
       `win ${pct(report.winRate.mean)} (tsumo ${pct(report.tsumoRate.mean)} / ron ${pct(report.ronRate.mean)}) | deal-in ${pct(report.dealInRate.mean)} | call ${pct(report.callRate.mean)} | riichi ${pct(report.riichiRate.mean)}`
     ];
+    if (report.actionDivergence && report.actionDivergence.rate != null) {
+      lines.push(`action divergence ${pct(report.actionDivergence.rate)} (${report.actionDivergence.diverged}/${report.actionDivergence.decisions} decisions)`);
+    }
     if (extra.control) lines.push(`control seed-cluster ${extra.control.seedClusterRankPoints.mean.toFixed(2)}`);
     if (extra.delta) lines.push(`paired delta ${extra.delta.mean.toFixed(2)} (95% CI [${(extra.delta.mean - extra.delta.ci95).toFixed(2)}, ${(extra.delta.mean + extra.delta.ci95).toFixed(2)}], seeds ${extra.delta.n})`);
     if (extra.power) for (const p of extra.power) {
