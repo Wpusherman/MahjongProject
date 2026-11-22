@@ -46,6 +46,7 @@ class Sample:
     source: str = ""
     match: str = ""
     hand: int = 0
+    hand_index: int = 0
 
 
 def read_jsonl(paths: list[str]) -> list[Sample]:
@@ -67,8 +68,11 @@ def read_jsonl(paths: list[str]) -> list[Sample]:
                 if not isinstance(rank, int) or not 1 <= rank <= 4:
                     raise ValueError(f"{path}:{line_no}: rank must be 1..4")
                 match = str(row.get("match") or f"{path}:{line_no}")
-                hand = int(row.get("handIndex", row.get("hand", 0)) or 0)
-                rows.append(Sample(np.asarray(x, dtype=np.float64), rank - 1, path, match, hand))
+                # `hand` is the unique hand ordinal inside a match (dealer repeats
+                # reuse handIndex), while handIndex is the East/South round 0..7.
+                hand = int(row.get("hand", row.get("handIndex", 0)) or 0)
+                hand_index = int(row.get("handIndex", hand) or 0)
+                rows.append(Sample(np.asarray(x, dtype=np.float64), rank - 1, path, match, hand, hand_index))
     if not rows:
         raise ValueError("no GRP samples found")
     return rows
@@ -103,6 +107,25 @@ def split_rows(rows: list[Sample], val_fraction: float, seed: int) -> tuple[list
         cutoff = max(1, min(len(rows) - 1, int(round(len(rows) * val_fraction))))
         return rows[:cutoff], rows[cutoff:] or rows[-1:]
     return train, val
+
+
+def dataset_checks(rows: list[Sample], train_rows: list[Sample], val_rows: list[Sample]) -> dict:
+    """Detect duplicate samples and match leakage across the split."""
+    keys, duplicates = set(), 0
+    for row in rows:
+        seat = int(np.argmax(row.x[13:17]))
+        key = (row.match, row.hand, seat)
+        if key in keys:
+            duplicates += 1
+        keys.add(key)
+    train_matches = {row.match for row in train_rows}
+    val_matches = {row.match for row in val_rows}
+    overlap = train_matches & val_matches
+    if overlap:
+        raise ValueError(f"train/val match overlap: {len(overlap)} matches (e.g. {sorted(overlap)[:3]})")
+    return {"samples": len(rows), "matches": len({row.match for row in rows}),
+            "duplicateSampleKeys": duplicates, "trainValMatchOverlap": len(overlap),
+            "trainMatches": len(train_matches), "valMatches": len(val_matches)}
 
 
 def stack(rows: list[Sample]) -> tuple[np.ndarray, np.ndarray]:
@@ -184,7 +207,7 @@ def evaluate_joint(model: MLP, rows: list[Sample], mean: np.ndarray, std: np.nda
             pred = int(np.argmax(p))
             actual_points = float(UMA[row.rank])
             base = baseline_rank(row)
-            bucket = buckets.setdefault(row.hand, [])
+            bucket = buckets.setdefault(row.hand_index, [])
             bucket.append({
                 "loss": float(-math.log(max(1e-12, float(p[row.rank])))),
                 "hit": 1.0 if pred == row.rank else 0.0,
@@ -309,6 +332,7 @@ def train(model: MLP, train_rows: list[Sample], val_rows: list[Sample], mean: np
     train_prob = model.predict(x_train)
     majority = np.bincount(y_val, minlength=4).max() / len(y_val)
     joint = evaluate_joint(model, val_rows, mean, std)
+    dataset = dataset_checks(train_rows + val_rows, train_rows, val_rows)
     return {
         "bestEpoch": best["epoch"],
         "epochs": len(history),
@@ -318,6 +342,7 @@ def train(model: MLP, train_rows: list[Sample], val_rows: list[Sample], mean: np
                 "accuracy": accuracy(val_prob, y_val), "brier": brier(val_prob, y_val),
                 "majorityBaseline": float(majority)},
         "joint": joint,
+        "dataset": dataset,
         "rankDistribution": np.bincount(y_val, minlength=4).tolist(),
         "history": history,
     }
@@ -432,7 +457,10 @@ def _run(train_rows: list[Sample], val_rows: list[Sample], args, out_dir: str) -
         except ImportError:
             print("warning: onnx is not installed; skipped ONNX export", file=sys.stderr)
             onnx_path = None
-    print(f"train samples {len(train_rows)} / val {len(val_rows)} (split by match)")
+    print(f"train samples {len(train_rows)} / val {len(val_rows)} (split by match; "
+          f"matches {metrics['dataset']['trainMatches']}/{metrics['dataset']['valMatches']}, "
+          f"overlap {metrics['dataset']['trainValMatchOverlap']}, "
+          f"duplicate keys {metrics['dataset']['duplicateSampleKeys']})")
     print(f"val accuracy {metrics['val']['accuracy']:.4f} (majority {metrics['val']['majorityBaseline']:.4f}) "
           f"/ logloss {metrics['val']['loss']:.4f} / brier {metrics['val']['brier']:.4f}")
     joint = metrics.get("joint") or {}

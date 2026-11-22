@@ -17,8 +17,12 @@ const MJ = globalThis.MJ;
     let scores = [25000, 25000, 25000, 25000], sticks = 0, dealer = seed % 4, honba = 0, hand = 0;
     let state = { hand, dealer, honba, mode };
     const maxDeals = mode === 'hanchan' ? 16 : 8;
+    // One advancing wall stream per match. Resetting the RNG to the same seed
+    // for every hand would replay the same wall with different seats, creating
+    // a spurious seat/rank correlation (and inflating East-1 GRP accuracy).
+    const rng = MJ.core.rng(seed);
     for (let deal = 0; deal < maxDeals; deal++) {
-      const game = new MJ.Game({ agents: [0, 1, 2, 3].map((seat) => MJ.ai.create(seat, { level: workerData.level || 'standard' })), rng: MJ.core.rng(seed) });
+      const game = new MJ.Game({ agents: [0, 1, 2, 3].map((seat) => MJ.ai.create(seat, { level: workerData.level || 'standard' })), rng });
       const result = await game.playHand({ roundWind: 27 + Math.floor(state.hand / 4), dealer: state.dealer,
         honba: state.honba, riichiSticks: sticks, scores: scores.slice(), hand: state.hand, mode });
       record.hands.push(game.recording);
