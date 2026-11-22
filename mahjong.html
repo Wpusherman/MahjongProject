@@ -168,7 +168,8 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
   </div>
   <div id="overlay" class="hidden" role="dialog" aria-modal="true"></div>
   <div id="toast" role="status"></div>
-  <input id="replay-file" type="file" accept=".json,application/json" hidden />
+  <input id="replay-file" type="file" accept=".json,.jsonl,.mjai,.mjlog,.xml,application/json,application/xml,text/xml" hidden />
+  <input id="weights-file" type="file" accept=".json,application/json" hidden />
   <input id="voice-files" type="file" accept=".wav,audio/wav" multiple hidden />
   <script>
 (function () {
@@ -252,8 +253,20 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
     return 8 - 2 * (sets + openSets) - Math.min(taatsu, 4 - sets - openSets) - pair;
   }
 
+  const standardCache = new Map();
   S.standard = function (counts, openSets) {
     openSets = openSets || 0;
+    const key = openSets + ':' + counts.join('');
+    let value = standardCache.get(key);
+    if (value === undefined) {
+      value = standardRaw(counts, openSets);
+      if (standardCache.size > 200000) standardCache.clear();
+      standardCache.set(key, value);
+    }
+    return value;
+  };
+
+  function standardRaw(counts, openSets) {
     const c = counts.slice();
     let min = 99;
 
@@ -303,7 +316,7 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
 
     dfs(0, 0, 0, 0);
     return min;
-  };
+  }
 
   S.chiitoi = function (counts) {
     let pairs = 0;
@@ -821,8 +834,111 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
 </script>
   <script>
 (function () {
+  const MJ = (globalThis.MJ = globalThis.MJ || {});
+  const R = (MJ.rank = {});
+  const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
+  const round = (n) => { const v = Math.round(n * 100) / 100; return v === 0 ? 0 : v; };
+
+  // uma: rank points by placement. returnScore > startScore adds the standard oka
+  // (return - start) * 4 / scoreUnit to first place. scoreWeight converts raw points
+  // above/below the start score into rank points.
+  R.CONFIGS = {
+    tenhou: { name: '天鳳風', uma: [90, 45, 0, -135], startScore: 25000, returnScore: 25000, scoreUnit: 1000, scoreWeight: 0 },
+    mleague: { name: 'Mリーグ風', uma: [50, 10, -10, -30], startScore: 25000, returnScore: 25000, scoreUnit: 1000, scoreWeight: 0.1 },
+    raw: { name: '素点のみ', uma: [0, 0, 0, 0], startScore: 25000, returnScore: 25000, scoreUnit: 1000, scoreWeight: 1 }
+  };
+  R.default = 'tenhou';
+  R.setDefault = function (name) { R.resolve(name); R.default = name; };
+  R.resolve = function (config) {
+    const source = config == null ? R.default : config;
+    const found = typeof source === 'string' ? R.CONFIGS[source] : source;
+    if (!found) throw new Error('Unknown rank config: ' + source);
+    const resolved = Object.assign({ name: 'custom', uma: [0, 0, 0, 0], startScore: 25000, returnScore: 25000,
+      scoreUnit: 1000, scoreWeight: 0 }, found);
+    resolved.uma = (found.uma || [0, 0, 0, 0]).slice();
+    return resolved;
+  };
+
+  R.order = function (scores) {
+    return scores.map((score, seat) => ({ score, seat }))
+      .sort((a, b) => b.score - a.score || a.seat - b.seat).map((x) => x.seat);
+  };
+
+  R.finalResult = function (scores, config) {
+    const c = R.resolve(config);
+    if (!Array.isArray(scores) || scores.length !== 4 || !scores.every(Number.isFinite)) throw new Error('scores must be four finite numbers');
+    const order = R.order(scores), ranks = Array(4), points = Array(4), uma = Array(4), raw = Array(4), oka = Array(4);
+    order.forEach((seat, i) => { ranks[seat] = i + 1; });
+    const okaValue = Math.max(0, (c.returnScore - c.startScore) * 4 / c.scoreUnit);
+    for (let seat = 0; seat < 4; seat++) {
+      const rank = ranks[seat];
+      uma[seat] = c.uma[rank - 1] || 0;
+      oka[seat] = rank === 1 ? okaValue : 0;
+      raw[seat] = (scores[seat] - c.startScore) / c.scoreUnit * c.scoreWeight;
+      points[seat] = round(uma[seat] + oka[seat] + raw[seat]);
+    }
+    return { config: c, order, ranks, points, uma, oka, raw };
+  };
+
+  // Rule-based expected rank points after a point swing. Each opponent is compared
+  // independently with a logistic whose scale grows when more hands remain.
+  R.expectedPoints = function (scores, seat, delta, config, opts = {}) {
+    if (!Array.isArray(scores) || scores.length !== 4) throw new Error('scores must have four seats');
+    const c = R.resolve(config);
+    const handsLeft = Math.max(1, opts.handsLeft == null ? 4 : opts.handsLeft);
+    const scale = Math.max(1, opts.scale == null ? 4000 + 2500 * handsLeft : opts.scale);
+    const target = scores[seat] + (Number(delta) || 0);
+    let below = 0;
+    for (let other = 0; other < 4; other++) {
+      if (other === seat) continue;
+      below += 1 / (1 + Math.exp(-(target - scores[other]) / scale));
+    }
+    const rank = clamp(4 - below, 1, 4);
+    const low = Math.floor(rank), high = Math.ceil(rank), f = rank - low;
+    const uma = c.uma[low - 1] * (1 - f) + c.uma[high - 1] * f;
+    const okaValue = Math.max(0, (c.returnScore - c.startScore) * 4 / c.scoreUnit);
+    const oka = okaValue * clamp(2 - rank, 0, 1);
+    const raw = (target - c.startScore) / c.scoreUnit * c.scoreWeight;
+    return { rank, points: round(uma + oka + raw), uma, oka, raw };
+  };
+  R.deltaPoints = function (scores, seat, delta, config, opts) {
+    const after = R.expectedPoints(scores, seat, delta, config, opts);
+    const before = R.expectedPoints(scores, seat, 0, config, opts);
+    return round(after.points - before.points);
+  };
+
+  // >1: losing points costs more rank EV than gaining the same points (protect a lead).
+  // <1: the player needs to push (chase). 1 without standings information.
+  R.riskBias = function (scores, seat, config, opts = {}) {
+    const swing = opts.swing == null ? 2000 : opts.swing;
+    const mid = R.expectedPoints(scores, seat, 0, config, opts);
+    const up = R.expectedPoints(scores, seat, swing, config, opts);
+    const down = R.expectedPoints(scores, seat, -swing, config, opts);
+    const gain = up.points - mid.points, loss = mid.points - down.points;
+    if (!(gain > 0) || !(loss > 0)) return 1;
+    return round(clamp(loss / gain, 0.5, 2));
+  };
+})();
+
+</script>
+  <script>
+(function () {
   const MJ = globalThis.MJ, T = MJ.tiles, S = MJ.shanten;
-  const AI = MJ.ai = { version: 'public-search-3' };
+  const AI = MJ.ai = { version: 'public-search-4' };
+  // Tunable heuristic weights. The defaults reproduce the hand-tuned public-search-4 AI.
+  const W = AI.weights = {
+    shantenCost: 125, ukeireGain: 1.25, shapeGain: 2.4, grossWeight: 0.035,
+    spareFive: 0.38, spareLow: 0.8, headBonus: 3.0, secondPairBonus: 1.4, pairYakuhai: 0.35,
+    growthHonor: 0.14, growthHonorPair: 0.16, growthNumber: 0.24,
+    growthNeighbor: 0.8, growthKabe: 0.36, growthEdge: 0.43,
+    survivalBase: 0.027, survivalThreat: 0.075,
+    dangerScale: 1.0, dangerPoints: 1.0,
+    pushMargin: 100, callDefense: 180, callDeltaRatio: 0.025, callDeltaMin: 20,
+  };
+  AI.setWeights = function (next) {
+    if (next) for (const key of Object.keys(W)) if (Number.isFinite(next[key])) W[key] = next[key];
+    return { ...W };
+  };
   const sum = (xs) => xs.reduce((a, b) => a + b, 0);
   const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
   const round = (n) => Math.round(n * 100) / 100;
@@ -837,9 +953,24 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
     return { opponents: [], ownDiscardTypes: [], doraIndicators: [], turnCount: 0, liveRemaining: 60,
       score: 25000, unseen: counts.map((n) => 4 - n), ...view };
   }
+  const HIDDEN_VIEW_KEYS = ['wall', 'liveWall', 'deadWall', 'uraIndicators', 'game', 'players'];
+  // The AI may only consume a public observation. These keys belong to the raw game state.
+  AI.assertObservation = function (view) {
+    if (!view || typeof view !== 'object') throw new Error('AI requires an observation');
+    for (const key of HIDDEN_VIEW_KEYS) if (key in view) throw new Error('AI observation leaked hidden state: ' + key);
+    for (const o of view.opponents || []) if ('hand' in o) throw new Error('AI observation leaked an opponent hand');
+    return view;
+  };
+  // Rank-point pressure: leaders value a point lost more than a point gained,
+  // trailers need to push. Without standings information this is neutral.
+  function rankBias(view) {
+    if (!MJ.rank || !Array.isArray(view.scores) || view.scores.length !== 4 || view.handsLeft == null) return 1;
+    try { return MJ.rank.riskBias(view.scores, view.seat, view.rankConfig, { handsLeft: view.handsLeft }); }
+    catch (_) { return 1; }
+  }
 
   // Public-information danger model. These are heuristic probabilities, not calibrated frequencies.
-  AI.risk = function (t, view) {
+  AI.risk = function (t, view, w = AI.weights) {
     let survive = 1, loss = 0;
     const detail = [];
     for (const o of view.opponents || []) {
@@ -875,22 +1006,22 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
       survive *= 1 - p; loss += p * points;
       detail.push({ seat: o.seat, probability: round(p * 100), genbutsu: safe });
     }
-    return { probability: 1 - survive, loss, detail };
+    return { probability: clamp((1 - survive) * w.dangerScale, 0, 1), loss: loss * w.dangerPoints, detail };
   };
 
   // Non-overlapping block decompositions. Keep alternatives with 5 and 6 blocks;
   // count the sixth only as flexibility, never as a fifth usable meld.
-  function blockShape(counts, view, unseen) {
+  function blockShape(counts, view, unseen, w = AI.weights) {
     const c = counts.slice(), groups = [], singles = [], meldCount = view.melds.length;
     let best = null, five = null, six = null;
     function growth(t) {
-      if (t >= 27) return unseen[t] * 0.14 + yakuhai(t, view) * unseen[t] * Math.max(0, unseen[t] - 1) * 0.16 + (t === view.seatWind ? 0.1 : 0);
-      let value = unseen[t] * 0.24;
+      if (t >= 27) return unseen[t] * w.growthHonor + yakuhai(t, view) * unseen[t] * Math.max(0, unseen[t] - 1) * w.growthHonorPair + (t === view.seatWind ? 0.1 : 0);
+      let value = unseen[t] * w.growthNumber;
       for (const delta of [-2, -1, 1, 2]) {
         const x = t + delta;
         if (x < 0 || x >= 27 || Math.floor(x / 9) !== Math.floor(t / 9)) continue;
         const low = Math.min(t, x) % 9;
-        value += unseen[x] * (Math.abs(delta) === 2 ? 0.36 : low >= 1 && low <= 6 ? 0.8 : 0.43);
+        value += unseen[x] * (Math.abs(delta) === 2 ? w.growthKabe : low >= 1 && low <= 6 ? w.growthNeighbor : w.growthEdge);
       }
       return value;
     }
@@ -902,15 +1033,15 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
       const blocks = groups.length + meldCount;
       let quality = 0;
       const values = incomplete.map((g) => {
-        if (g.kind === 'pair') return unseen[g.t] * (1.0 + yakuhai(g.t, view) * 0.35);
+        if (g.kind === 'pair') return unseen[g.t] * (1.0 + yakuhai(g.t, view) * w.pairYakuhai);
         return g.waits.reduce((n, t) => n + unseen[t], 0) * (g.kind === 'ryanmen' ? 1 : g.kind === 'kanchan' ? 0.82 : 0.68);
       }).sort((a, b) => b - a);
       values.forEach((value, i) => { quality += value * (i < 5 - sets - meldCount ? 1 : 0.12); });
       const spare = singles.map(growth).sort((a, b) => b - a);
       // Spare central tiles can replace bad taatsu even at five blocks.
-      spare.forEach((value, i) => { quality += value * (blocks < 5 ? 0.8 : 0.38) / (i + 1); });
-      if (head) quality += 3.0;
-      if (pairs.length === 2) quality += 1.4; // alternative heads / triplet completion
+      spare.forEach((value, i) => { quality += value * (blocks < 5 ? w.spareLow : w.spareFive) / (i + 1); });
+      if (head) quality += w.headBonus;
+      if (pairs.length === 2) quality += w.secondPairBonus; // alternative heads / triplet completion
       const value = -sh * 100 + quality;
       const plan = { blocks, head, pairs: pairs.length, ryanmen: groups.filter((g) => g.kind === 'ryanmen').length,
         weak: groups.filter((g) => g.kind === 'penchan' || g.kind === 'kanchan').length, quality, sh, value };
@@ -940,6 +1071,79 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
     return { ...best, five: five && round(five.quality), six: six && round(six.quality) };
   }
   AI.blockShape = blockShape;
+
+  // Seven pairs and thirteen orphans are scored as their own plans, so the shape,
+  // acceptance and point estimate always match the route that fixes the shanten.
+  function chiitoiShape(counts, unseen) {
+    let pairs = 0, kinds = 0, growth = 0;
+    for (let t = 0; t < 34; t++) {
+      if (!counts[t]) continue;
+      kinds++;
+      if (counts[t] >= 2) pairs++; else growth += Math.min(unseen[t], 3);
+    }
+    return { blocks: pairs, head: pairs > 0, pairs, ryanmen: 0, weak: 0,
+      quality: pairs * 4 + growth * 0.55, sh: 6 - pairs + Math.max(0, 7 - kinds), five: null, six: null };
+  }
+  function kokushiShape(counts, unseen) {
+    let kinds = 0, pair = 0, growth = 0;
+    for (const t of T.YAOCHU_TYPES) {
+      if (counts[t]) kinds++;
+      if (counts[t] >= 2) pair = 1;
+      if (counts[t] === 1) growth += Math.min(unseen[t], 3);
+    }
+    return { blocks: 0, head: !!pair, pairs: pair, ryanmen: 0, weak: 0,
+      quality: growth * 0.6, sh: 13 - kinds - pair, five: null, six: null };
+  }
+  function closedPoints(han, fu, view) {
+    const pointsAt = (h) => Math.min(8000, MJ.score.limitBase(h, fu * 2 ** (2 + h)) * 4) * (view.isDealer ? 1.5 : 1);
+    return pointsAt(Math.floor(han)) * (1 - han % 1) + pointsAt(Math.ceil(han)) * (han % 1);
+  }
+  function chiitoiValue(counts, view, reds) {
+    let han = 2, simple = true, yaochu = true, honor = false;
+    const suits = new Set();
+    for (let t = 0; t < 34; t++) if (counts[t]) {
+      if (!T.isSimple(t)) simple = false;
+      if (!T.isYaochu(t)) yaochu = false;
+      if (T.isHonor(t)) honor = true; else suits.add(T.suitOf(t));
+    }
+    if (simple) han += 1;
+    if (yaochu) han += 2;
+    if (suits.size === 1) han += honor ? 3 : 6;
+    for (let t = 0; t < 34; t++) han += counts[t] * dora(t, view);
+    han += reds;
+    return { points: Math.max(1000, closedPoints(han, 25, view)), yakuChance: 1, closed: true };
+  }
+  function kokushiValue(view) {
+    return { points: view.isDealer ? 48000 : 32000, yakuChance: 1, closed: true };
+  }
+  function routeShanten(counts, melds, route) {
+    if (route === 'chiitoi') return S.chiitoi(counts);
+    if (route === 'kokushi') return S.kokushi(counts);
+    return S.standard(counts, melds);
+  }
+  function bestRoute(counts, melds) {
+    const std = S.standard(counts, melds);
+    let route = 'standard', sh = std;
+    if (melds === 0) {
+      const chi = S.chiitoi(counts), kok = S.kokushi(counts);
+      if (chi < sh) { route = 'chiitoi'; sh = chi; }
+      if (kok < sh) { route = 'kokushi'; sh = kok; }
+    }
+    return { route, sh };
+  }
+  function routeUkeire(counts, melds, unseen, route) {
+    const base = routeShanten(counts, melds, route);
+    const tiles = []; let total = 0;
+    for (let t = 0; t < 34; t++) {
+      if (counts[t] >= 4 || unseen[t] <= 0) continue;
+      counts[t]++;
+      const s = routeShanten(counts, melds, route);
+      counts[t]--;
+      if (s < base) { tiles.push(t); total += unseen[t]; }
+    }
+    return { tiles, count: total, base };
+  }
+  AI.bestRoute = bestRoute;
 
   function handValue(counts, view, redCount) {
     const all = counts.slice();
@@ -990,19 +1194,25 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
     }
     return { winProbability: mass[stages], tenpaiProbability: tenpai };
   }
-  function evaluator(view) {
+  function evaluator(view, w = AI.weights) {
     const cache = new Map(), shapeCache = new Map();
     return function evaluate(counts, unseen, turns, reds, discarded = [], future) {
       const key = counts.join('') + '/' + unseen.join('') + '/' + turns + '/' + reds + '/' + discarded.join(',') + '/' + future;
       if (cache.has(key)) return cache.get(key);
-      const sh = S.shanten(counts, view.melds.length), uk = S.ukeire(counts, view.melds.length, unseen);
-      const shapeKey = counts.join('') + '/' + unseen.join('');
+      const { route, sh } = bestRoute(counts, view.melds.length);
+      const uk = routeUkeire(counts, view.melds.length, unseen, route);
+      const shapeKey = route + ':' + counts.join('') + '/' + unseen.join('');
       let shape = shapeCache.get(shapeKey);
       if (!shape) {
-        shape = sh === 0 ? { quality: 0, blocks: 5, head: counts.some((n) => n === 2), ryanmen: 0, five: 0, six: null } : blockShape(counts, view, unseen);
+        if (sh === 0) shape = { quality: 0, blocks: 5, head: counts.some((n) => n === 2), ryanmen: 0, five: 0, six: null };
+        else if (route === 'chiitoi') shape = chiitoiShape(counts, unseen);
+        else if (route === 'kokushi') shape = kokushiShape(counts, unseen);
+        else shape = blockShape(counts, view, unseen, w);
         shapeCache.set(shapeKey, shape);
       }
-      const hv = handValue(counts, { ...view, unseen }, reds);
+      const hv = route === 'chiitoi' ? chiitoiValue(counts, view, reds)
+        : route === 'kokushi' ? kokushiValue(view)
+        : handValue(counts, { ...view, unseen }, reds);
       let outs = uk.count, points = hv.points, yakuChance = hv.yakuChance;
       const furiten = sh === 0 && uk.tiles.some((t) => view.ownDiscardTypes.includes(t) || discarded.includes(t));
       if (sh === 0) {
@@ -1017,14 +1227,14 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
       }
       const probs = probability(sh, outs, future, sum(unseen), turns);
       // Ron and opponents ending the hand are approximated, clearly identified in the record.
-      const survival = Math.exp(-(view.threat ? 0.075 : 0.027) * Math.max(1, sh + 1) * turns / 2);
+      const survival = Math.exp(-(view.threat ? w.survivalThreat : w.survivalBase) * Math.max(1, sh + 1) * turns / 2);
       const ronFactor = sh === 0 && outs ? uk.tiles.reduce((n, t) => n + unseen[t] * (T.isYaochu(t) ? 0.6 : T.numOf(t) === 2 || T.numOf(t) === 8 ? 0.4 : 0.25), 0) / outs : 0.35;
       const gross = probs.winProbability * points * yakuChance * survival * (furiten ? 1 : 1 + ronFactor);
-      const efficiency = -sh * 125 + uk.count * 1.25 + shape.quality * 2.4;
-      const value = { sh, ukeire: uk.count, waits: uk.tiles, shape: round(shape.quality), blocks: shape.blocks,
-        blockPlans: { five: shape.five, six: shape.six, head: shape.head, ryanmen: shape.ryanmen },
+      const efficiency = -sh * w.shantenCost + uk.count * w.ukeireGain + shape.quality * w.shapeGain;
+      const value = { sh, ukeire: uk.count, waits: uk.tiles, shape: round(shape.quality), blocks: shape.blocks, route,
+        blockPlans: { five: shape.five, six: shape.six, head: shape.head, ryanmen: shape.ryanmen, pairs: shape.pairs },
         ...probs, estimatedWinPoints: round(points), grossEV: gross, yakuChance, furiten,
-        score: efficiency + gross * 0.035 };
+        score: efficiency + gross * w.grossWeight };
       cache.set(key, value); return value;
     };
   }
@@ -1034,7 +1244,7 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
     const choices = [];
     let min = 99;
     for (let t = 0; t < 34; t++) if (counts[t] && !forbidden.includes(t)) {
-      counts[t]--; const sh = S.shanten(counts, view.melds.length); counts[t]++;
+      counts[t]--; const sh = bestRoute(counts, view.melds.length).sh; counts[t]++;
       choices.push({ t, sh }); min = Math.min(min, sh);
     }
     let best = null;
@@ -1047,10 +1257,10 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
     }
     return best;
   }
-  function lookahead(counts, view, evaluate, turns, reds) {
+  function lookahead(counts, view, evaluate, turns, reds, w = AI.weights) {
     const unseen = view.unseen.slice(), pool = sum(unseen);
     let score = 0, gross = 0, tenpai = 0, win = 0, future = 0, improvedWeight = 0, improvedUkeire = 0;
-    const baseSh = S.shanten(counts, view.melds.length);
+    const baseSh = bestRoute(counts, view.melds.length).sh;
     // Includes non-shanten-improving draws: replacement taatsu, spare central tiles, extra heads.
     for (let t = 0; t < 34; t++) {
       if (!unseen[t] || counts[t] >= 4) continue;
@@ -1058,7 +1268,7 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
       counts[t]++; unseen[t]--;
       if (MJ.agari.isAgari(counts, view.melds.length)) {
         const value = winValue(counts, t, view, reds, view.menzen && view.score >= 1000);
-        if (value) { score += weight * (125 + value * 0.035); gross += weight * value; tenpai += weight; win += weight; counts[t]--; unseen[t]++; continue; }
+        if (value) { score += weight * (w.shantenCost + value * w.grossWeight); gross += weight * value; tenpai += weight; win += weight; counts[t]--; unseen[t]++; continue; }
       }
       const best = postDrawChoices(counts, unseen, view, evaluate, Math.max(0, turns - 1), reds);
       counts[t]--; unseen[t]++;
@@ -1070,21 +1280,22 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
     return { nextScore: score, expectedGross: gross, futureUkeire: future, improvedUkeire: improvedWeight ? improvedUkeire / improvedWeight : 0,
       winProbability: win, tenpaiProbability: tenpai };
   }
-  AI.analyzeDiscard = function (rawView, level = 'strong') {
-    const view = normalized(rawView), counts = T.countsFromIds(view.hand), evaluate = evaluator(view);
-    const turns = horizon(view), reds = redCount(view), candidates = [];
+  AI.analyzeDiscard = function (rawView, level = 'strong', w = AI.weights) {
+    AI.assertObservation(rawView);
+    const view = normalized(rawView), counts = T.countsFromIds(view.hand), evaluate = evaluator(view, w);
+    const turns = horizon(view), reds = redCount(view), bias = rankBias(view), candidates = [];
     const types = [...new Set((view.legalDiscards || view.hand).filter((id) => !(view.forbidden || []).includes(id >> 2)).map((id) => id >> 2))];
     for (const t of types) {
       const tileId = pickId(view.hand, t, view.drawnTile);
       counts[t]--;
       const ev = evaluate(counts, view.unseen, turns, reds - Number(T.isRed(tileId)), [t]);
       counts[t]++;
-      const risk = AI.risk(t, view);
+      const risk = AI.risk(t, view, w);
       const copies = counts[t];
       // Folding with duplicate safer tiles reserves safe exits for later turns.
       const reserve = risk.probability < 0.09 ? Math.max(0, copies - 1) * (1 - risk.probability * 8) * 65 : 0;
       const futureLoss = view.threat ? risk.loss * Math.min(3, 0.65 + ev.sh * 0.65) : 0;
-      const expectedNet = ev.grossEV - risk.loss - futureLoss;
+      const expectedNet = ev.grossEV - (risk.loss + futureLoss) * bias;
       candidates.push({ ...ev, t, tileId, danger: round(risk.probability * 100), dangerByOpponent: risk.detail,
         expectedLoss: round(risk.loss + futureLoss), expectedNet, reserve,
         doraLoss: dora(t, view) + Number(T.isRed(tileId)), score: view.threat ? expectedNet + reserve + ev.score * 0.08 : ev.score });
@@ -1096,7 +1307,7 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
       for (const c of beam) {
         if (c.sh === 0) continue;
         counts[c.t]--;
-        const next = lookahead(counts, view, evaluate, turns, reds - Number(T.isRed(c.tileId)));
+        const next = lookahead(counts, view, evaluate, turns, reds - Number(T.isRed(c.tileId)), w);
         counts[c.t]++;
         c.futureUkeire = round(next.futureUkeire);
         c.improvedUkeire = round(next.improvedUkeire);
@@ -1109,7 +1320,7 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
     }
     for (const c of candidates) { c.expectedNet = round(c.expectedNet); c.score = round(c.score); c.grossEV = round(c.grossEV); }
     return { version: AI.version, model: 'public-info / all-tile one-draw search + finite-horizon approximation',
-      level, horizon: turns, unseen: view.unseen.slice(), candidates };
+      level, horizon: turns, rankBias: bias, unseen: view.unseen.slice(), candidates };
   };
   function forbiddenCall(action) {
     const out = [action.tile];
@@ -1120,8 +1331,9 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
     }
     return out;
   }
-  AI.analyzeCall = function (rawView, options) {
-    const view = normalized(rawView), turns = horizon(view), ev = evaluator(view);
+  AI.analyzeCall = function (rawView, options, w = AI.weights) {
+    AI.assertObservation(rawView);
+    const view = normalized(rawView), turns = horizon(view), ev = evaluator(view, w), bias = rankBias(view);
     const counts = T.countsFromIds(view.hand), pass = ev(counts, view.unseen, turns, redCount(view));
     const alternatives = [{ action: null, label: '見送り', sh: pass.sh, ukeire: pass.ukeire, expectedNet: round(pass.grossEV), winProbability: pass.winProbability }];
     const actions = [];
@@ -1139,13 +1351,13 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
       let result;
       if (action.type === 'kan') {
         // Average the replacement draw. Unknown new dora is not peeked at or credited.
-        const next = lookahead(T.countsFromIds(hand), v, evaluator(v), turns, redCount(v));
-        result = { sh: S.shanten(T.countsFromIds(hand), v.melds.length), ukeire: next.futureUkeire,
+        const next = lookahead(T.countsFromIds(hand), v, evaluator(v, w), turns, redCount(v), w);
+        result = { sh: bestRoute(T.countsFromIds(hand), v.melds.length).sh, ukeire: next.futureUkeire,
           expectedNet: next.expectedGross - (view.threat ? 500 : 120), winProbability: next.winProbability };
-      } else result = AI.analyzeDiscard(v, 'standard').candidates[0];
+      } else result = AI.analyzeDiscard(v, 'standard', w).candidates[0];
       if (!result) continue;
       // Fewer concealed tiles also reduce future defensive exits.
-      const defenseCost = view.threat ? 180 + 80 * v.melds.length : 0;
+      const defenseCost = view.threat ? (w.callDefense + 80 * v.melds.length) * bias : 0;
       alternatives.push({ action, label: action.type === 'chi' ? 'チー ' + action.tiles.map(T.label).join('・') : action.type === 'pon' ? 'ポン' : '大明槓',
         discard: result.tileId, sh: result.sh, ukeire: round(result.ukeire), expectedNet: round(result.expectedNet - defenseCost), winProbability: result.winProbability });
     }
@@ -1155,33 +1367,38 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
     const delta = best ? best.expectedNet - baseline : 0;
     // Normalized EV difference stays defined with zero/negative EV; it is NOT a win probability.
     const advantagePercent = best ? 100 * delta / Math.max(100, Math.abs(best.expectedNet), Math.abs(baseline)) : 0;
-    const selected = best && delta > Math.max(20, Math.abs(baseline) * 0.025) ? best.action : null;
-    return { version: AI.version, kind: 'call', model: 'approximate net EV', unseen: view.unseen.slice(), horizon: turns,
+    const selected = best && delta > Math.max(w.callDeltaMin, Math.abs(baseline) * w.callDeltaRatio) ? best.action : null;
+    return { version: AI.version, kind: 'call', model: 'approximate net EV', unseen: view.unseen.slice(), horizon: turns, rankBias: bias,
       alternatives, selected, bestCall: best?.action || null, delta: round(delta), advantagePercent: round(advantagePercent),
       percentDefinition: '(bestCallEV - passEV) / max(100, abs(bestCallEV), abs(passEV)) * 100' };
   };
   AI.create = function (seat, opts = {}) {
+    const weights = opts.weights ? { ...AI.weights, ...opts.weights } : AI.weights;
     return {
-      seat, lastCallAnalysis: null,
+      seat, weights, lastCallAnalysis: null,
       async wantTsumo() { return true; },
       async chooseDiscard(view) {
+        AI.assertObservation(view);
         if (view.riichi) return { tileId: view.drawnTile, riichi: false, analysis: { version: AI.version, forced: true } };
-        const analysis = AI.analyzeDiscard(view, opts.level || 'strong'), best = analysis.candidates[0];
-        const riichi = view.menzen && best.sh === 0 && !best.furiten && view.score >= 1000 && view.liveRemaining >= 4 && (!view.threat || best.expectedNet > 100);
+        const analysis = AI.analyzeDiscard(view, opts.level || 'strong', weights), best = analysis.candidates[0];
+        const margin = weights.pushMargin * rankBias(view);
+        const riichi = view.menzen && best.sh === 0 && !best.furiten && view.score >= 1000 && view.liveRemaining >= 4 && (!view.threat || best.expectedNet > margin);
         return { tileId: best.tileId, riichi, analysis };
       },
       async wantCall(view, options) {
+        AI.assertObservation(view);
         this.lastCallAnalysis = null;
         if (options.ron) return { type: 'ron' };
         if (view.riichi) return null;
-        this.lastCallAnalysis = AI.analyzeCall(view, options);
+        this.lastCallAnalysis = AI.analyzeCall(view, options, weights);
         return this.lastCallAnalysis.selected;
       },
       async wantKan(view, kans) {
+        AI.assertObservation(view);
         if (view.threat || view.liveRemaining < 8) return null;
-        const c = T.countsFromIds(view.hand), base = S.shanten(c, view.melds.length);
+        const c = T.countsFromIds(view.hand), base = bestRoute(c, view.melds.length).sh;
         return kans.find((k) => { const after = c.slice(); after[k.tile] -= k.kind === 'ankan' ? 4 : 1;
-          return S.shanten(after, view.melds.length + Number(k.kind === 'ankan')) <= base; }) || null;
+          return bestRoute(after, view.melds.length + Number(k.kind === 'ankan')).sh <= base; }) || null;
       }
     };
   };
@@ -1198,6 +1415,21 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
     const ids = hand.filter((id) => (id >> 2) === type).sort((a, b) => Number(T.isRed(a)) - Number(T.isRed(b))).slice(0, n);
     for (const id of ids) hand.splice(hand.indexOf(id), 1);
     return ids;
+  };
+  // The red-five flag of a face-down tile is not public information.
+  const nonRedCopy = (type) => {
+    for (let copy = 0; copy < 4; copy++) if (!T.isRed(type * 4 + copy)) return type * 4 + copy;
+    return type * 4;
+  };
+  const publicMeld = (m) => {
+    const out = Object.assign({}, m, { tiles: m.tiles.slice() });
+    if (!m.open && m.kind === 'kan') {
+      // A concealed kan reveals only its tile type. The outer two tiles are face down;
+      // a red five hidden there is replaced by a plain copy of the same type.
+      out.tiles = m.tiles.map((id, i) => (i === 0 || i === m.tiles.length - 1) && T.isRed(id) ? nonRedCopy(id >> 2) : id);
+      out.concealed = true;
+    }
+    return out;
   };
 
   function Game(config) {
@@ -1220,7 +1452,9 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
   Game.prototype.setup = function (config) {
     Object.assign(this, { roundWind: config.roundWind, dealer: config.dealer, honba: config.honba || 0,
       riichiSticks: config.riichiSticks || 0, turnCount: 0, anyCall: false, ended: false, result: null,
-      wallIndex: 0, liveEnd: 122, rinshanIndex: 0, doraRevealed: 1, currentSeat: config.dealer });
+      wallIndex: 0, liveEnd: 122, rinshanIndex: 0, doraRevealed: 1, currentSeat: config.dealer,
+      handIndex: config.hand != null ? config.hand : 0, mode: config.mode || 'tonpu' });
+    this.handsLeft = Math.max(1, (this.mode === 'hanchan' ? 8 : 4) - this.handIndex);
     this.players = Array.from({ length: 4 }, (_, seat) => ({ seat, hand: [], melds: [], discards: [], river: [],
       discardHistory: [], score: config.scores[seat], riichi: false, doubleRiichi: false, ippatsu: false,
       tempFuriten: false, riichiFuriten: false, drawnTile: null, drawCount: 0, riichiTurn: -1,
@@ -1265,21 +1499,38 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
     this.doraIndicators.forEach(dec);
     return u;
   };
-  Game.prototype.buildView = function (seat, extra) {
-    const p = this.players[seat];
-    const opponents = this.players.filter((o) => o.seat !== seat).map((o) => ({ seat: o.seat, riichi: o.riichi,
-      discards: o.discards.slice(), discardTypes: o.discardHistory.map((d) => d.tileId >> 2),
-      discardHistory: clone(o.discardHistory), melds: clone(o.melds), score: o.score, isDealer: o.seat === this.dealer,
-      safeTypes: o.riichi ? [...new Set(this.players.flatMap((x) => x.discardHistory.filter((d) => d.turn >= o.riichiTurn).map((d) => d.tileId >> 2)))] : [] }));
-    return Object.assign({ seat, hand: sortHand(p.hand), melds: clone(p.melds), drawnTile: p.drawnTile,
+  // Public observation for one seat: own hand plus information every player can see.
+  // During play it never contains another player's hand IDs, the wall, the dead wall or
+  // ura indicators. Hands are added only when a result or an explicit replay flag reveals them.
+  Game.prototype.getObservation = function (seat, extra) {
+    const p = this.players[seat], opts = extra || {};
+    const opponents = this.players.filter((o) => o.seat !== seat).map((o) => {
+      const view = { seat: o.seat, handCount: o.hand.length, riichi: o.riichi,
+        discards: o.discards.slice(), discardTypes: o.discardHistory.map((d) => d.tileId >> 2),
+        discardHistory: clone(o.discardHistory), melds: o.melds.map(publicMeld), score: o.score, isDealer: o.seat === this.dealer,
+        safeTypes: o.riichi ? [...new Set(this.players.flatMap((x) => x.discardHistory.filter((d) => d.turn >= o.riichiTurn).map((d) => d.tileId >> 2)))] : [] };
+      const revealedByResult = this.ended && this.result &&
+        (this.result.winner === o.seat || (this.result.tenpai || []).includes(o.seat));
+      if (opts.revealAll || revealedByResult) view.hand = sortHand(o.hand);
+      return view;
+    });
+    const observation = Object.assign({ seat, hand: sortHand(p.hand), melds: clone(p.melds), drawnTile: p.drawnTile,
       discards: this.players.map((x) => x.discards.slice()), doraIndicators: this.doraIndicators.slice(),
-      scores: this.players.map((x) => x.score), roundWind: this.roundWind, seatWind: this.seatWindOf(seat),
+      scores: this.players.map((x) => x.score), seatWinds: this.players.map((_, s) => this.seatWindOf(s)),
+      roundWind: this.roundWind, seatWind: this.seatWindOf(seat),
+      dealer: this.dealer, honba: this.honba, riichiSticks: this.riichiSticks,
+      handIndex: this.handIndex, mode: this.mode, handsLeft: this.handsLeft,
       isDealer: seat === this.dealer, riichi: p.riichi, menzen: !p.melds.some((m) => m.open),
       liveRemaining: this.liveRemaining(), unseen: this.computeUnseen(seat), opponents,
       threat: opponents.some((o) => o.riichi), score: p.score, turnCount: this.turnCount,
       forbidden: p.forbidden.slice(), legalDiscards: p.hand.filter((id) => !p.forbidden.includes(id >> 2)),
-      ownDiscardTypes: p.discardHistory.map((d) => d.tileId >> 2) }, extra || {});
+      ownDiscardTypes: p.discardHistory.map((d) => d.tileId >> 2), ownDiscardHistory: clone(p.discardHistory),
+      currentSeat: this.currentSeat, ended: this.ended, result: clone(this.result), lastDiscard: clone(this.lastDiscard || null) }, extra || {});
+    if (opts.ui) { observation.waits = this.waits(seat); observation.furiten = this.isFuriten(seat); }
+    return observation;
   };
+  // Kept as an alias for older callers; new code should use getObservation.
+  Game.prototype.buildView = function (seat, extra) { return this.getObservation(seat, extra); };
   Game.prototype.waits = function (seat, hand, meldCount) {
     const p = this.players[seat], counts = T.countsFromIds(hand || p.hand), out = [];
     for (let t = 0; t < 34; t++) {
@@ -1468,7 +1719,7 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
       if (!opts) continue;
       const agent = this.agents[seat];
       agent.lastCallAnalysis = null;
-      const action = await agent.wantCall(this.buildView(seat, { callTile: tileId, callType: tileId >> 2, callFrom: from, isCallDecision: true }), opts);
+      const action = await agent.wantCall(this.getObservation(seat, { callTile: tileId, callType: tileId >> 2, callFrom: from, isCallDecision: true }), opts);
       if (this.cancelled) return null;
       this.record('response', { seat, from, tileId, robKan: robKan || null, action, options: opts, analysis: agent.lastCallAnalysis });
       if (opts.ron && (!action || action.type !== 'ron')) {
@@ -1503,14 +1754,14 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
         this.log(`P${cur + 1} ${rinshan ? '嶺上ツモ' : 'ツモ'}`);
         this.onUpdate();
         const win = this.evalWin(cur, tile, { tsumo: true, rinshan, haitei });
-        if (win && await this.agents[cur].wantTsumo(this.buildView(cur, { win, canTsumo: true }))) {
+        if (win && await this.agents[cur].wantTsumo(this.getObservation(cur, { win, canTsumo: true }))) {
           if (this.cancelled) return null;
           return this.doWin(cur, tile, { tsumo: true, rinshan, haitei }, win);
         }
         if (this.cancelled) return null;
         const kans = this.availableKans(cur);
         if (kans.length) {
-          const k = await this.agents[cur].wantKan(this.buildView(cur, { kans }), kans);
+          const k = await this.agents[cur].wantKan(this.getObservation(cur, { kans }), kans);
           if (this.cancelled) return null;
           if (k) {
             if (!kans.some((x) => x.kind === k.kind && x.tile === k.tile)) throw new Error('Illegal kan');
@@ -1524,7 +1775,7 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
       }
       this.onUpdate();
       const wasRiichi = p.riichi;
-      const decision = await this.agents[cur].chooseDiscard(this.buildView(cur, { canRiichi: this.canRiichi(cur), haitei }));
+      const decision = await this.agents[cur].chooseDiscard(this.getObservation(cur, { canRiichi: this.canRiichi(cur), haitei }));
       if (this.cancelled) return null;
       const tileId = wasRiichi ? p.drawnTile : decision.tileId;
       const riichi = !wasRiichi && decision.riichi && this.canRiichi(cur) && this.waits(cur, p.hand.filter((id) => id !== tileId)).length > 0;
@@ -1561,6 +1812,211 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
       return next;
     }
   };
+})();
+
+</script>
+  <script>
+(function () {
+  const MJ = (globalThis.MJ = globalThis.MJ || {});
+  const T = MJ.tiles;
+  const C = (MJ.core = { version: 'core-0.1' });
+
+  // Deterministic PRNG used when a wall is not supplied.
+  function mulberry32(a) {
+    return function () {
+      a |= 0; a = (a + 0x6d2b79f5) | 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  function seedToUint(seed) {
+    if (Number.isFinite(seed)) return seed >>> 0;
+    const text = String(seed == null ? 0 : seed);
+    let h = 2166136261;
+    for (let i = 0; i < text.length; i++) { h ^= text.charCodeAt(i); h = Math.imul(h, 16777619); }
+    return h >>> 0;
+  }
+  C.rng = function (seed) { return mulberry32(seedToUint(seed)); };
+
+  const clone = (x) => JSON.parse(JSON.stringify(x));
+  const pass = () => ({ type: 'pass' });
+  const isPass = (action) => action == null || action === false || (typeof action === 'object' && action.type === 'pass');
+
+  function normalizeConfig(config) {
+    return Object.assign({ roundWind: 27, dealer: 0, honba: 0, riichiSticks: 0,
+      scores: [25000, 25000, 25000, 25000] }, config || {});
+  }
+
+  function Core(config, seed) {
+    this.config = normalizeConfig(config);
+    this.seed = seed;
+    this.rng = C.rng(seed);
+    this.wall = this.config.wall ? this.config.wall.slice() : T.buildWall(this.rng);
+    this.game = null;
+    this.pending = null;
+    this.result = null;
+    this.done = false;
+    this.error = null;
+    this._resolve = null;
+    this._ready = null;
+    this._cursor = 0;
+    this._loop = null;
+    this._started = false;
+  }
+
+  const discardActions = (core, view) => {
+    if (view.riichi) return view.drawnTile == null ? [] : [{ type: 'discard', tileId: view.drawnTile, riichi: false }];
+    const out = [], seen = new Set();
+    for (const tileId of view.legalDiscards || view.hand || []) {
+      if (seen.has(tileId)) continue;
+      seen.add(tileId);
+      out.push({ type: 'discard', tileId, riichi: false });
+      if (view.canRiichi && core.game.waits(view.seat, view.hand.filter((id) => id !== tileId)).length > 0) {
+        out.push({ type: 'discard', tileId, riichi: true });
+      }
+    }
+    return out;
+  };
+  const callActions = (options) => {
+    const out = [];
+    if (options.ron) out.push({ type: 'ron' });
+    if (options.pon != null) out.push({ type: 'pon', tile: options.tile });
+    if (options.kan != null) out.push({ type: 'kan', tile: options.tile });
+    for (const pair of options.chi || []) out.push({ type: 'chi', tile: options.tile, tiles: pair.slice() });
+    out.push(pass());
+    return out;
+  };
+  const kanActions = (kans) => kans.map((k) => ({ type: 'kan', kan: { kind: k.kind, tile: k.tile } })).concat([pass()]);
+
+  Core.prototype._agent = function (seat) {
+    const core = this;
+    return {
+      lastCallAnalysis: null,
+      wantTsumo(view) {
+        core._pend(seat, 'tsumo', view, [{ type: 'tsumo' }, pass()]);
+        return core._deferred();
+      },
+      chooseDiscard(view) {
+        core._pend(seat, 'discard', view, discardActions(core, view));
+        return core._deferred();
+      },
+      wantCall(view, options) {
+        this.lastCallAnalysis = null;
+        core._pend(seat, 'call', view, callActions(options));
+        return core._deferred();
+      },
+      wantKan(view, kans) {
+        core._pend(seat, 'kan', view, kanActions(kans));
+        return core._deferred();
+      }
+    };
+  };
+
+  Core.prototype._pend = function (seat, type, view, legal) {
+    if (this.pending) throw new Error('A decision is already pending');
+    this.pending = { seat, type, view, legal };
+    this._signal();
+  };
+  Core.prototype._deferred = function () {
+    if (this._resolve) throw new Error('A decision is already waiting');
+    return new Promise((resolve) => { this._resolve = resolve; });
+  };
+  Core.prototype._signal = function () {
+    const ready = this._ready;
+    if (ready) { this._ready = null; ready(); }
+  };
+  Core.prototype._waitReady = function () {
+    if (this.pending || this.done) return Promise.resolve();
+    return new Promise((resolve) => { this._ready = resolve; });
+  };
+  Core.prototype._drain = function () {
+    const all = this.game.recording.events;
+    const events = all.slice(this._cursor).map(clone);
+    this._cursor = all.length;
+    return events;
+  };
+
+  Core.prototype.start = async function () {
+    if (this._started) throw new Error('Game already started');
+    this._started = true;
+    const agents = [0, 1, 2, 3].map((seat) => this._agent(seat));
+    this.game = new MJ.Game({ agents, rng: this.rng });
+    this._loop = this.game.playHand(Object.assign({}, this.config, { wall: this.wall }))
+      .then((result) => { this.result = result; this.done = true; this.pending = null; this._signal(); },
+        (error) => { this.error = error; this.done = true; this._signal(); });
+    await this._waitReady();
+    if (this.error) throw this.error;
+    return this._drain();
+  };
+
+  Core.prototype.current = function () {
+    if (!this.pending) return null;
+    return { seat: this.pending.seat, type: this.pending.type, legal: this.pending.legal.map(clone) };
+  };
+  Core.prototype.legal_actions = function (seat) {
+    if (!this.pending) return [];
+    if (seat != null && seat !== this.pending.seat) return [];
+    return this.pending.legal.map(clone);
+  };
+  Core.prototype.observe = function (seat) {
+    if (!this.game) throw new Error('Game has not started');
+    if (this.pending && this.pending.seat === seat) return this.pending.view;
+    return this.game.getObservation(seat);
+  };
+  Core.prototype.is_terminal = function () { return this.done; };
+  Core.prototype.final_result = function () { return this.result; };
+
+  Core.prototype._validate = function (pending, action) {
+    if (pending.type === 'discard') {
+      const a = typeof action === 'number' ? { type: 'discard', tileId: action, riichi: false } : action;
+      if (!a || (a.type && a.type !== 'discard') || !Number.isInteger(a.tileId)) throw new Error('Illegal discard action');
+      const riichi = !!a.riichi;
+      const legal = pending.legal.some((x) => x.type === 'discard' && x.tileId === a.tileId && x.riichi === riichi);
+      if (!legal) throw new Error(`Illegal discard: tile ${a.tileId}${riichi ? ' with riichi' : ''}`);
+      return { tileId: a.tileId, riichi, analysis: a.analysis || null };
+    }
+    if (pending.type === 'tsumo') return action === true || (action && action.type === 'tsumo');
+    if (pending.type === 'kan') {
+      if (isPass(action)) return null;
+      const kan = action.kan || action;
+      const legal = pending.legal.find((x) => x.type === 'kan' && x.kan.kind === kan.kind && x.kan.tile === kan.tile);
+      if (!legal) throw new Error('Illegal kan action');
+      return legal.kan;
+    }
+    if (pending.type === 'call') {
+      if (isPass(action)) return null;
+      const legal = pending.legal.find((x) => x.type === action.type &&
+        (action.type === 'ron' || (x.tile === action.tile && (action.type !== 'chi' || JSON.stringify(x.tiles) === JSON.stringify(action.tiles)))));
+      if (!legal) throw new Error('Illegal call action');
+      return legal;
+    }
+    throw new Error('Unknown pending decision: ' + pending.type);
+  };
+
+  Core.prototype.step = async function (action) {
+    if (this.done) throw new Error('Game is terminal');
+    const pending = this.pending;
+    if (!pending) throw new Error('No pending decision');
+    const decision = this._validate(pending, action);
+    const resolve = this._resolve;
+    if (!resolve) throw new Error('No waiting agent');
+    this.pending = null;
+    this._resolve = null;
+    resolve(decision);
+    await this._waitReady();
+    if (this.error) throw this.error;
+    return this._drain();
+  };
+
+  C.Core = Core;
+  C.create = function (config, seed) { return new Core(config, seed); };
+  C.new_game = async function (config, seed) {
+    const core = new Core(config, seed);
+    await core.start();
+    return core;
+  };
+  C.newGame = C.new_game;
 })();
 
 </script>
@@ -1659,6 +2115,762 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
 </script>
   <script>
 (function () {
+  const MJ = (globalThis.MJ = globalThis.MJ || {});
+  const T = MJ.tiles;
+  const M = (MJ.mjai = { version: 'mjai-0.1' });
+  const HONORS = ['E', 'S', 'W', 'N', 'P', 'F', 'C'];
+  const HONOR_INDEX = { E: 27, S: 28, W: 29, N: 30, P: 31, F: 32, C: 33 };
+  const clone = (x) => JSON.parse(JSON.stringify(x));
+
+  function tileString(id) {
+    if (!Number.isInteger(id) || id < 0 || id > 135) throw new Error('Invalid tile id: ' + id);
+    const type = id >> 2;
+    if (type >= 27) return HONORS[type - 27];
+    const suit = 'mps'[Math.floor(type / 9)];
+    return (type % 9 + 1) + suit + (T.isRed(id) ? 'r' : '');
+  }
+  function parseTile(str) {
+    if (str == null || str === '?') return null;
+    if (HONOR_INDEX[str] != null) return { type: HONOR_INDEX[str], red: false };
+    const m = /^([0-9])([mps])(r)?$/.exec(str);
+    if (!m) throw new Error('Unknown mjai tile: ' + str);
+    const n = Number(m[1]);
+    const type = 'mps'.indexOf(m[2]) * 9 + (n === 0 ? 4 : n - 1);
+    return { type, red: !!m[3] || n === 0 };
+  }
+  M.tileString = tileString;
+  M.parseTile = parseTile;
+
+  M.parse = function (text) {
+    if (typeof text !== 'string') throw new Error('mjai input must be JSON Lines text');
+    const events = [];
+    text.split(/\r?\n/).forEach((line, i) => {
+      const s = line.trim();
+      if (!s) return;
+      let event;
+      try { event = JSON.parse(s); } catch (e) { throw new Error(`mjai line ${i + 1}: ${e.message}`); }
+      if (!event || typeof event.type !== 'string') throw new Error(`mjai line ${i + 1}: missing type`);
+      events.push(event);
+    });
+    return events;
+  };
+  M.stringify = function (events) { return events.map((e) => JSON.stringify(e)).join('\n') + '\n'; };
+
+  function createPool() {
+    const used = new Set();
+    return {
+      take(str) {
+        const p = parseTile(str);
+        if (!p) throw new Error('Cannot assign an unknown tile');
+        const ids = [0, 1, 2, 3].map((c) => p.type * 4 + c);
+        ids.sort((a, b) => Number(T.isRed(a) && !p.red) - Number(T.isRed(b) && !p.red));
+        for (const id of ids) if (!used.has(id)) { used.add(id); return id; }
+        throw new Error('A tile type appears more than four times: ' + str);
+      },
+      remaining() {
+        const out = [];
+        for (let id = 0; id < 136; id++) if (!used.has(id)) out.push(id);
+        return out;
+      }
+    };
+  }
+  function takeFromHand(hand, str, prefer) {
+    const p = parseTile(str);
+    if (!p) throw new Error('Cannot match an unknown tile');
+    let candidates = hand.filter((id) => (id >> 2) === p.type && (!p.red || T.isRed(id)));
+    if (!candidates.length) candidates = hand.filter((id) => (id >> 2) === p.type);
+    if (!candidates.length) throw new Error('Tile is not in hand: ' + str);
+    candidates.sort((a, b) => Number(T.isRed(a)) - Number(T.isRed(b)));
+    return prefer != null && candidates.includes(prefer) ? prefer : candidates[0];
+  }
+  function findInHand(hand, str, prefer) {
+    const p = parseTile(str);
+    if (!p) throw new Error('Cannot match an unknown tile');
+    const candidates = hand.filter((id) => (id >> 2) === p.type);
+    return prefer != null && candidates.includes(prefer) ? prefer : candidates[0];
+  }
+  const remove = (hand, id) => { const i = hand.indexOf(id); if (i < 0) throw new Error('Tile not in hand: ' + id); hand.splice(i, 1); };
+  const mapTenhouReason = (type) => ({
+    yao9: 'nine_terminals', kaze4: 'four_winds', reach4: 'four_riichi', kan4: 'four_kans', nm: 'nagashi'
+  }[type] || 'exhaustive');
+  const toTenhouReason = (reason) => ({
+    'four-kans': 'four_kans', 'four-riichi': 'four_riichi', 'four-winds': 'four_winds', exhaustive: 'exhaustive'
+  }[reason] || 'exhaustive');
+  const roundWindOf = (bakaze) => (bakaze === 'S' || bakaze === 's' ? 28 : 27);
+
+  // ---------------------------------------------------------------------------
+  // 翠卓 JSON -> mjai events
+  // ---------------------------------------------------------------------------
+  M.fromSuitaku = function (record, options = {}) {
+    if (!record || !Array.isArray(record.hands) || !record.hands.length) throw new Error('翠卓の牌譜が必要です');
+    const events = [];
+    events.push({ type: 'start_game', names: options.names || ['P0', 'P1', 'P2', 'P3'],
+      rule: { aka: (record.rules && record.rules.redFives) !== 0, kuitan: !!(record.rules && record.rules.openTanyao),
+        atamahane: !record.rules || record.rules.ron !== 'multiple', mode: record.mode || 'tonpu' } });
+    record.hands.forEach((hand) => {
+      const config = hand.config || {}, start = (hand.events || []).find((e) => e.type === 'start') || {};
+      const acceptedRiichi = new Set((hand.events || []).filter((e) => e.type === 'riichi').map((e) => e.seat));
+      const initialDora = start.doraIndicators && start.doraIndicators[0];
+      if (!Array.isArray(hand.initialHands) || hand.initialHands.length !== 4) throw new Error('配牌データが不正です');
+      events.push({ type: 'start_kyoku', bakaze: config.roundWind === 28 ? 'S' : 'E', kyoku: (config.dealer || 0) + 1,
+        honba: config.honba || 0, kyotaku: config.riichiSticks || 0, oya: config.dealer || 0,
+        dora_marker: initialDora == null ? null : tileString(initialDora),
+        tehais: hand.initialHands.map((ids) => ids.map(tileString)), scores: (config.scores || []).slice() });
+      for (const e of hand.events || []) {
+        if (e.type === 'start' || e.type === 'riichi' || e.type === 'response') continue;
+        if (e.type === 'draw') events.push({ type: 'tsumo', actor: e.seat, pai: tileString(e.tileId), ...(e.rinshan ? { rinshan: true } : {}) });
+        else if (e.type === 'discard') {
+          if (e.riichi) events.push({ type: 'reach', actor: e.seat });
+          events.push({ type: 'dahai', actor: e.seat, pai: tileString(e.tileId), tsumogiri: !!e.tsumogiri });
+          if (e.riichi && acceptedRiichi.has(e.seat)) events.push({ type: 'reach_accepted', actor: e.seat });
+        } else if (e.type === 'call') {
+          const meld = e.meld, called = meld.calledTile;
+          const consumed = meld.tiles.filter((id) => id !== called && id !== meld.addedTile);
+          events.push({ type: e.action.type === 'chi' ? 'chi' : e.action.type === 'pon' ? 'pon' : 'daiminkan',
+            actor: e.seat, target: e.from, pai: tileString(called), consumed: consumed.map(tileString) });
+        } else if (e.type === 'kan') {
+          if (e.action.kind === 'ankan') {
+            const meld = (e.melds || []).find((m) => m.kind === 'kan' && !m.open && m.type === e.action.tile);
+            events.push({ type: 'ankan', actor: e.seat, consumed: meld.tiles.map(tileString) });
+          } else {
+            const meld = (e.melds || []).find((m) => m.kind === 'kan' && m.addedTile != null && (m.addedTile >> 2) === e.action.tile);
+            events.push({ type: 'kakan', actor: e.seat, pai: tileString(meld.addedTile),
+              consumed: meld.tiles.filter((id) => id !== meld.addedTile).map(tileString) });
+          }
+        } else if (e.type === 'dora') {
+          const indicators = e.doraIndicators || [];
+          events.push({ type: 'dora', dora_marker: tileString(indicators[indicators.length - 1]) });
+        } else if (e.type === 'end') {
+          const end = e, result = end.result || {};
+          if (result.type === 'win') {
+            events.push({ type: 'hora', actor: result.winner, target: result.tsumo ? result.winner : result.loser,
+              pai: tileString(result.winTile), tsumo: !!result.tsumo,
+              deltas: (end.scores || []).map((s, i) => s - (config.scores[i] || 0)), scores: (end.scores || []).slice(),
+              yaku: ((result.score && result.score.yaku) || []).map((y) => y.name),
+              han: result.score && result.score.han || 0, fu: result.score && result.score.fu || 0,
+              point: result.received || 0, ura_markers: (result.uraIndicators || []).map(tileString) });
+          } else {
+            events.push({ type: 'ryukyoku', reason: toTenhouReason(result.reason),
+              tenpai: (result.tenpai || []).slice(), deltas: (end.scores || []).map((s, i) => s - (config.scores[i] || 0)),
+              scores: (end.scores || []).slice() });
+          }
+          events.push({ type: 'end_kyoku' });
+        }
+      }
+    });
+    events.push({ type: 'end_game' });
+    return events;
+  };
+
+  // ---------------------------------------------------------------------------
+  // mjai events -> 翠卓 JSON (rebuilds a valid wall and replayable event log)
+  // ---------------------------------------------------------------------------
+  M.toSuitaku = function (events, options = {}) {
+    if (!Array.isArray(events) || !events.length) throw new Error('mjai events are required');
+    const startGame = events.find((e) => e.type === 'start_game') || {};
+    const rule = startGame.rule || {};
+    if (rule.sanma) throw new Error('三麻牌譜は四人打ちcoreでは扱えません');
+    const strict = !!options.strict;
+    const flags = [];
+    const rounds = [];
+    let current = null;
+    let sawSouth = false;
+    for (const e of events) {
+      if (e.type === 'start_kyoku') { if (current) rounds.push(current); current = { start: e, events: [] }; }
+      else if (current) {
+        if (e.type === 'end_game') { rounds.push(current); current = null; }
+        else if (e.type === 'end_kyoku') current.ended = true;
+        else current.events.push(e);
+      }
+    }
+    if (current) rounds.push(current);
+    if (!rounds.length) throw new Error('start_kyoku がありません');
+
+    const hands = rounds.map((round, handIndex) => {
+      const pool = createPool();
+      const start = round.start;
+      if (!Array.isArray(start.tehais) || start.tehais.length !== 4) throw new Error('start_kyoku.tehais が不正です');
+      const initialHands = start.tehais.map((arr, seat) => {
+        if (!Array.isArray(arr) || arr.length !== 13) throw new Error(`座席${seat}の配牌が13枚ではありません`);
+        return arr.map((str) => pool.take(str));
+      });
+      const scores = Array.isArray(start.scores) && start.scores.length === 4 ? start.scores.slice() : [25000, 25000, 25000, 25000];
+      const bakaze = start.bakaze === 'S' ? 28 : 27;
+      if (bakaze === 28) sawSouth = true;
+      const config = { roundWind: bakaze, dealer: start.oya || 0, honba: start.honba || 0,
+        riichiSticks: start.kyotaku || 0, scores, hand: handIndex, mode: rule.mode || 'tonpu' };
+      const state = {
+        hands: initialHands.map((h) => h.slice()), melds: [[], [], [], []], discards: [[], [], [], []],
+        dora: start.dora_marker ? [pool.take(start.dora_marker)] : [], draws: [], lastDraw: [null, null, null, null],
+        lastDiscard: [null, null, null, null], rinshan: [false, false, false, false], reach: [false, false, false, false],
+        anyCall: false, turn: 0, riichiSticks: config.riichiSticks, result: null, finalScores: null,
+        horaCount: 0, ura: [], events: []
+      };
+      const emit = (event) => state.events.push(Object.assign({ index: state.events.length, turn: state.turn }, event));
+      emit({ type: 'start', scores: scores.slice(), doraIndicators: state.dora.slice() });
+
+      for (const e of round.events) {
+        switch (e.type) {
+          case 'tsumo': {
+            const id = pool.take(e.pai);
+            const rinshan = !!e.rinshan || state.rinshan[e.actor];
+            state.rinshan[e.actor] = false;
+            state.hands[e.actor].push(id); state.lastDraw[e.actor] = id;
+            state.draws.push({ id, rinshan });
+            emit({ type: 'draw', seat: e.actor, tileId: id, rinshan });
+            break;
+          }
+          case 'dahai': {
+            const id = takeFromHand(state.hands[e.actor], e.pai, state.lastDraw[e.actor]);
+            const tsumogiri = e.tsumogiri == null ? state.lastDraw[e.actor] === id : !!e.tsumogiri;
+            remove(state.hands[e.actor], id);
+            state.lastDraw[e.actor] = null; state.lastDiscard[e.actor] = id; state.discards[e.actor].push(id);
+            emit({ type: 'discard', seat: e.actor, tileId: id, tsumogiri, riichi: !!state.reach[e.actor], called: false });
+            state.turn++;
+            break;
+          }
+          case 'reach': state.reach[e.actor] = true; break;
+          case 'reach_accepted': {
+            const doubleRiichi = !state.anyCall && state.discards[e.actor].length === 1;
+            state.reach[e.actor] = false; state.riichiSticks++;
+            emit({ type: 'riichi', seat: e.actor, doubleRiichi });
+            break;
+          }
+          case 'chi': case 'pon': case 'daiminkan': {
+            const target = e.target, called = state.lastDiscard[target];
+            if (called == null) throw new Error(`${e.type}: 鳴かれた牌がありません`);
+            const p = parseTile(e.pai);
+            if (!p || (called >> 2) !== p.type) throw new Error(`${e.type}: pai と直前の打牌が一致しません`);
+            const consumed = [];
+            for (const str of e.consumed || []) {
+              const id = takeFromHand(state.hands[e.actor], str);
+              remove(state.hands[e.actor], id);
+              consumed.push(id);
+            }
+            const meld = { kind: e.type === 'chi' ? 'seq' : e.type === 'pon' ? 'trip' : 'kan',
+              type: e.type === 'chi' ? Math.min(called >> 2, ...consumed.map((id) => id >> 2)) : called >> 2,
+              open: true, tiles: [called, ...consumed], from: target, calledTile: called };
+            state.melds[e.actor].push(meld); state.lastDraw[e.actor] = null; state.lastDiscard[target] = null;
+            state.anyCall = true;
+            if (e.type === 'daiminkan') state.rinshan[e.actor] = true;
+            emit({ type: 'call', seat: e.actor, from: target,
+              action: { type: e.type === 'daiminkan' ? 'kan' : e.type, tile: called >> 2,
+                ...(e.type === 'chi' ? { tiles: consumed.map((id) => id >> 2) } : {}) }, meld: clone(meld) });
+            break;
+          }
+          case 'ankan': {
+            const consumed = [];
+            for (const str of e.consumed || []) {
+              const id = takeFromHand(state.hands[e.actor], str);
+              remove(state.hands[e.actor], id);
+              consumed.push(id);
+            }
+            const meld = { kind: 'kan', type: consumed[0] >> 2, open: false, tiles: consumed.slice() };
+            state.melds[e.actor].push(meld); state.lastDraw[e.actor] = null; state.anyCall = true; state.rinshan[e.actor] = true;
+            emit({ type: 'kan', seat: e.actor, action: { kind: 'ankan', tile: meld.type }, melds: clone(state.melds[e.actor]) });
+            break;
+          }
+          case 'kakan': {
+            const added = takeFromHand(state.hands[e.actor], e.pai);
+            remove(state.hands[e.actor], added);
+            const meld = state.melds[e.actor].find((m) => m.kind === 'trip' && m.type === (added >> 2));
+            if (!meld) throw new Error('kakan: 加槓するポンがありません');
+            meld.kind = 'kan'; meld.addedTile = added; meld.tiles.push(added);
+            state.lastDraw[e.actor] = null; state.anyCall = true; state.rinshan[e.actor] = true;
+            emit({ type: 'kan', seat: e.actor, action: { kind: 'kakan', tile: added >> 2 }, melds: clone(state.melds[e.actor]) });
+            break;
+          }
+          case 'dora': {
+            state.dora.push(pool.take(e.dora_marker));
+            emit({ type: 'dora', doraIndicators: state.dora.slice() });
+            break;
+          }
+          case 'hora': {
+            state.horaCount++;
+            if (state.horaCount > 1) {
+              flags.push('multiple_hora');
+              if (strict) throw new Error('複数ロン（ダブロン）は頭ハネ設定と異なるため除外します');
+              break;
+            }
+            const tsumo = !!e.tsumo;
+            let winTile;
+            if (tsumo) {
+              winTile = findInHand(state.hands[e.actor], e.pai, state.lastDraw[e.actor]);
+              if (winTile == null) throw new Error('hora: ツモ和了牌が手牌にありません');
+            } else {
+              winTile = state.lastDiscard[e.target];
+              if (winTile == null) throw new Error('hora: ロン和了牌がありません');
+            }
+            state.ura = (e.ura_markers || []).map((str) => pool.take(str));
+            const finalScores = Array.isArray(e.scores) && e.scores.length === 4 ? e.scores.slice()
+              : e.deltas ? scores.map((s, i) => s + (e.deltas[i] || 0)) : null;
+            if (!finalScores) throw new Error('hora: scores も deltas もありません');
+            const deltas = Array.isArray(e.deltas) && e.deltas.length === 4 ? e.deltas.slice()
+              : finalScores.map((s, i) => s - scores[i]);
+            const yaku = (e.yaku || []).map((y) => typeof y === 'string' ? { name: y, han: 0 } : { name: String(y.name || y), han: Number(y.han) || 0 });
+            const result = { type: 'win', winner: e.actor, loser: tsumo ? null : (e.target == null ? null : e.target),
+              tsumo, score: { han: Number(e.han) || 0, fu: Number(e.fu) || 0, yaku, dora: Number(e.dora) || 0,
+                yakuman: !!e.yakuman, payments: {} }, winTile, uraIndicators: state.ura.slice(),
+              received: deltas[e.actor] || 0, sticks: config.riichiSticks };
+            state.result = result; state.finalScores = finalScores; state.riichiSticks = 0;
+            emit({ type: 'end', scores: finalScores.slice(), result, riichiSticks: 0 });
+            break;
+          }
+          case 'ryukyoku': {
+            const finalScores = Array.isArray(e.scores) && e.scores.length === 4 ? e.scores.slice()
+              : e.deltas ? scores.map((s, i) => s + (e.deltas[i] || 0)) : scores.slice();
+            const result = { type: 'draw', tenpai: (e.tenpai || []).slice(), reason: (e.reason || 'exhaustive').replace(/_/g, '-') };
+            state.result = result; state.finalScores = finalScores;
+            emit({ type: 'end', scores: finalScores.slice(), result, riichiSticks: state.riichiSticks });
+            break;
+          }
+          default: break;
+        }
+      }
+      if (!state.result || !state.finalScores) throw new Error(`局${handIndex + 1}: 和了・流局イベントがありません`);
+
+      const wall = new Array(136).fill(null);
+      let pos = 0;
+      for (let seat = 0; seat < 4; seat++) for (const id of initialHands[seat]) wall[pos++] = id;
+      let live = 52, rinshanCount = 0;
+      for (const d of state.draws) {
+        if (d.rinshan) { if (rinshanCount >= 4) throw new Error('嶺上牌が4枚を超えています'); wall[122 + rinshanCount++] = d.id; }
+        else { if (live >= 122) throw new Error('生牌山が不足しています'); wall[live++] = d.id; }
+      }
+      for (let i = 0; i < state.dora.length; i++) {
+        if (i >= 5) throw new Error('ドラ表示牌が5枚を超えています');
+        wall[126 + i * 2] = state.dora[i];
+      }
+      for (let i = 0; i < state.ura.length; i++) {
+        if (i >= 5) throw new Error('裏ドラ表示牌が5枚を超えています');
+        wall[127 + i * 2] = state.ura[i];
+      }
+      const remaining = pool.remaining();
+      let ri = 0;
+      for (let i = 0; i < 136; i++) if (wall[i] == null) wall[i] = remaining[ri++];
+      if (ri !== remaining.length || wall.some((id) => id == null) || new Set(wall).size !== 136) throw new Error('牌山の再構築に失敗しました');
+
+      return { config, wall, initialHands: initialHands.map((h) => h.slice().sort((a, b) => a - b)),
+        events: state.events, result: state.result, finalScores: state.finalScores };
+    });
+
+    const hasRed = events.some((e) => {
+      const tiles = [e.pai, ...(e.consumed || []), ...(e.ura_markers || []), e.dora_marker];
+      if (e.type === 'start_kyoku') for (const hand of e.tehais || []) tiles.push(...hand);
+      return ['5mr', '5pr', '5sr', '0m', '0p', '0s'].some((t) => tiles.includes(t));
+    });
+    if (rule.aka === false && hasRed) {
+      flags.push('red_mismatch');
+      if (strict) throw new Error('赤なしの牌譜に赤5が含まれています');
+    }
+    if (rule.kuitan === false) {
+      flags.push('no_kuitan');
+      if (strict) throw new Error('喰いタンなしの牌譜は現在のルールと異なります');
+    }
+    const mode = rule.mode === 'hanchan' || sawSouth ? 'hanchan' : 'tonpu';
+    const record = {
+      format: 'suitaku-riichi', version: 1, createdAt: options.createdAt || new Date().toISOString(),
+      mode, ai: 'imported',
+      rules: { players: 4, initialScore: 25000, redFives: rule.aka === false ? 0 : 3,
+        openTanyao: rule.kuitan !== false, ron: rule.atamahane === false ? 'multiple' : 'atamahane',
+        dealerTenpaiRepeat: true, agariYame: false, extension: false, kuikae: false,
+        nineTerminals: false, nagashiMangan: false },
+      hands, annotations: [], finalScores: hands[hands.length - 1].finalScores.slice(), finished: true,
+      mjai: { rule: clone(rule), flags, source: options.source || 'mjai' }
+    };
+    return record;
+  };
+
+  M.validate = function (record) {
+    MJ.record.validate(record);
+    const warnings = [];
+    for (let i = 0; i < record.hands.length; i++) {
+      const hand = record.hands[i];
+      let replay;
+      try { replay = MJ.record.snapshot(hand, hand.events.length - 1); }
+      catch (e) { throw new Error(`局${i + 1}のリプレイに失敗しました: ${e.message}`); }
+      const got = replay.players.map((p) => p.score);
+      const expected = hand.finalScores || (hand.events.filter((e) => e.type === 'end').slice(-1)[0] || {}).scores;
+      if (expected && JSON.stringify(got) !== JSON.stringify(expected)) warnings.push(`局${i + 1}: 最終点数が一致しません ${got} != ${expected}`);
+      const sum = got.reduce((a, b) => a + b, 0) + replay.riichiSticks * 1000;
+      if (sum !== 100000) warnings.push(`局${i + 1}: 点数と供託の合計が100,000点ではありません (${sum})`);
+      if (hand.events.some((e, index) => e.index != null && e.index !== index)) warnings.push(`局${i + 1}: イベント番号が連続していません`);
+    }
+    return { ok: warnings.length === 0, warnings };
+  };
+
+  // ---------------------------------------------------------------------------
+  // Tenhou mjlog XML -> mjai events
+  // ---------------------------------------------------------------------------
+  M.fromTenhou = function (xml, options = {}) {
+    if (typeof xml !== 'string') throw new Error('mjlog XML text is required');
+    const tags = [];
+    const re = /<([A-Za-z0-9]+)((?:\s+[^>]*?)?)\s*\/?>/g;
+    let match;
+    while ((match = re.exec(xml))) {
+      const attrs = {};
+      const ar = /([A-Za-z0-9_]+)="([^"]*)"/g;
+      let a;
+      while ((a = ar.exec(match[2]))) attrs[a[1]] = a[2].replace(/&quot;/g, '"').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+      tags.push({ tag: match[1], attrs });
+    }
+    const decodeName = (s) => { try { return decodeURIComponent(s); } catch (_) { return s; } };
+    const events = [];
+    let go = 0, names = ['P0', 'P1', 'P2', 'P3'], startEmitted = false;
+    let round = null, roundEnded = false, roundIndex = 0;
+    let lastDraw = [null, null, null, null], lastDiscard = [null, null, null, null], rinshanPending = [false, false, false, false];
+    const emitStart = () => {
+      if (startEmitted) return;
+      startEmitted = true;
+      events.push({ type: 'start_game', names: names.slice(),
+        rule: { aka: !(go & 0x02), kuitan: !(go & 0x04), atamahane: true, sanma: !!(go & 0x10),
+          mode: go & 0x08 ? 'hanchan' : 'tonpu', source: 'tenhou' } });
+    };
+    const finishRound = () => { if (roundEnded) { events.push({ type: 'end_kyoku' }); roundEnded = false; round = null; } };
+
+    for (const { tag, attrs } of tags) {
+      if (roundEnded && tag !== 'AGARI') finishRound();
+      if (tag === 'GO') { go = Number(attrs.type) || 0; continue; }
+      if (tag === 'UN' && attrs.dan && !startEmitted) {
+        for (let i = 0; i < 4; i++) if (attrs['n' + i] != null) names[i] = decodeName(attrs['n' + i]);
+        continue;
+      }
+      if (tag === 'TAIKYOKU' || tag === 'INIT') emitStart();
+      if (tag === 'INIT') {
+        if (go & 0x10) throw new Error('三麻牌譜は四人打ちcoreでは扱えません');
+        const seed = (attrs.seed || '0,0,0,0,0,0').split(',').map(Number);
+        const kyoku = seed[0] || 0, honba = seed[1] || 0, kyotaku = seed[2] || 0, dora = seed[5];
+        const ten = (attrs.ten || '250,250,250,250').split(',').map((x) => Number(x) * 100);
+        const oya = Number(attrs.oya) || 0;
+        const tehais = [0, 1, 2, 3].map((s) => (attrs['hai' + s] || '').split(',').filter(Boolean).map((x) => tileString(Number(x))));
+        if (tehais.some((h) => h.length !== 13)) throw new Error(`天鳳局${roundIndex + 1}: 配牌が13枚ではありません`);
+        events.push({ type: 'start_kyoku', bakaze: kyoku < 4 ? 'E' : 'S', kyoku: kyoku % 4 + 1, honba,
+          kyotaku, oya, dora_marker: dora == null || Number.isNaN(dora) ? null : tileString(dora), tehais, scores: ten });
+        round = { index: roundIndex++ }; roundEnded = false;
+        lastDraw = [null, null, null, null]; lastDiscard = [null, null, null, null]; rinshanPending = [false, false, false, false];
+        continue;
+      }
+      const drawMatch = /^([TUVW])(\d+)$/.exec(tag);
+      if (drawMatch) {
+        const seat = 'TUVW'.indexOf(drawMatch[1]), id = Number(drawMatch[2]);
+        const rinshan = rinshanPending[seat]; rinshanPending[seat] = false;
+        events.push({ type: 'tsumo', actor: seat, pai: tileString(id), ...(rinshan ? { rinshan: true } : {}) });
+        lastDraw[seat] = id;
+        continue;
+      }
+      const discardMatch = /^([DEFG])(\d+)$/.exec(tag);
+      if (discardMatch) {
+        const seat = 'DEFG'.indexOf(discardMatch[1]), id = Number(discardMatch[2]);
+        events.push({ type: 'dahai', actor: seat, pai: tileString(id), tsumogiri: lastDraw[seat] === id });
+        lastDraw[seat] = null; lastDiscard[seat] = id;
+        continue;
+      }
+      if (tag === 'N') {
+        const who = Number(attrs.who), m = Number(attrs.m);
+        const decoded = decodeMeld(m);
+        const target = (who + decoded.from) % 4;
+        if (decoded.kind === 'ankan') {
+          events.push({ type: 'ankan', actor: who, consumed: decoded.tiles.map(tileString) });
+        } else if (decoded.kind === 'kakan') {
+          events.push({ type: 'kakan', actor: who, pai: tileString(decoded.called),
+            consumed: decoded.tiles.filter((id) => id !== decoded.called).map(tileString) });
+        } else {
+          const called = lastDiscard[target] != null && decoded.tiles.some((id) => (id >> 2) === (lastDiscard[target] >> 2))
+            ? lastDiscard[target] : decoded.called;
+          let calledIndex = lastDiscard[target] != null ? decoded.tiles.indexOf(lastDiscard[target]) : -1;
+          if (calledIndex < 0) calledIndex = decoded.tiles.findIndex((id) => (id >> 2) === (called >> 2));
+          const consumed = decoded.tiles.filter((_, index) => index !== calledIndex);
+          events.push({ type: decoded.kind === 'chi' ? 'chi' : decoded.kind === 'pon' ? 'pon' : 'daiminkan',
+            actor: who, target, pai: tileString(called), consumed: consumed.map(tileString) });
+        }
+        lastDraw[who] = null;
+        if (decoded.kind === 'chi' || decoded.kind === 'pon' || decoded.kind === 'daiminkan') lastDiscard[target] = null;
+        if (decoded.kind === 'ankan' || decoded.kind === 'kakan' || decoded.kind === 'daiminkan') rinshanPending[who] = true;
+        continue;
+      }
+      if (tag === 'REACH') {
+        events.push({ type: Number(attrs.step) === 2 ? 'reach_accepted' : 'reach', actor: Number(attrs.who) });
+        continue;
+      }
+      if (tag === 'DORA') { events.push({ type: 'dora', dora_marker: tileString(Number(attrs.hai)) }); continue; }
+      if (tag === 'AGARI') {
+        const who = Number(attrs.who), fromWho = Number(attrs.fromWho);
+        const sc = (attrs.sc || '').split(',').map(Number);
+        const ten = (attrs.ten || '30,0,0').split(',').map(Number);
+        const yakuRaw = (attrs.yaku || '').split(',').filter(Boolean).map(Number);
+        const yaku = [];
+        for (let i = 0; i + 1 < yakuRaw.length; i += 2) yaku.push(yakuName(yakuRaw[i]));
+        const scores = [0, 1, 2, 3].map((i) => (sc[i * 2] || 0) * 100);
+        const deltas = [0, 1, 2, 3].map((i) => (sc[i * 2 + 1] || 0) * 100);
+        const ura = (attrs.doraHaiUra || '').split(',').filter(Boolean).map((x) => tileString(Number(x)));
+        events.push({ type: 'hora', actor: who, target: who === fromWho ? who : fromWho,
+          pai: tileString(Number(attrs.machi)), tsumo: who === fromWho, deltas, scores,
+          yaku, han: yakuRaw.filter((_, i) => i % 2 === 1).reduce((a, b) => a + b, 0), fu: ten[0] || 0,
+          point: ten[1] || deltas[who], ura_markers: ura });
+        roundEnded = true;
+        continue;
+      }
+      if (tag === 'RYUUKYOKU') {
+        const sc = (attrs.sc || '').split(',').map(Number);
+        const scores = [0, 1, 2, 3].map((i) => (sc[i * 2] || 0) * 100);
+        const deltas = [0, 1, 2, 3].map((i) => (sc[i * 2 + 1] || 0) * 100);
+        const tenpai = [0, 1, 2, 3].filter((i) => attrs['hai' + i] != null);
+        events.push({ type: 'ryukyoku', reason: mapTenhouReason(attrs.type), tenpai, deltas, scores });
+        roundEnded = true;
+        continue;
+      }
+      if (tag === 'owari' && options.keepOwari) events.push({ type: 'owari', raw: attrs.owari || '' });
+    }
+    finishRound();
+    events.push({ type: 'end_game' });
+    return events;
+  };
+
+  function decodeMeld(m) {
+    const from = m & 3;
+    if (m & 0x4) {
+      let t = m >> 10;
+      const r = t % 3;
+      t = Math.floor(t / 3);
+      const base = Math.floor(t / 7) * 9 + t % 7;
+      const ofs = [(m >> 3) & 3, (m >> 5) & 3, (m >> 7) & 3];
+      const tiles = [0, 1, 2].map((i) => (base + i) * 4 + ofs[i]);
+      return { kind: 'chi', tiles, from, called: tiles[r] };
+    }
+    if (m & 0x8) {
+      let t = m >> 9;
+      const r = t % 3;
+      t = Math.floor(t / 3);
+      const unused = (m >> 5) & 3;
+      const tiles = [0, 1, 2, 3].map((i) => t * 4 + i).filter((id) => (id & 3) !== unused);
+      return { kind: 'pon', tiles, from, called: tiles[r] };
+    }
+    if (m & 0x10) {
+      const t = Math.floor((m >> 9) / 3);
+      const added = t * 4 + ((m >> 5) & 3);
+      return { kind: 'kakan', tiles: [0, 1, 2, 3].map((i) => t * 4 + i), from, called: added };
+    }
+    const type = Math.floor((m >> 8) / 4);
+    return { kind: from === 0 ? 'ankan' : 'daiminkan', tiles: [0, 1, 2, 3].map((i) => type * 4 + i), from, called: null };
+  }
+
+  // Partial Tenhou yaku-ID table. Unknown IDs remain visible as yaku_<id>.
+  const YAKU_NAMES = {
+    0: '門前清自摸和', 1: '立直', 2: '一発', 3: '槍槓', 4: '嶺上開花', 5: '海底摸月', 6: '河底撈魚',
+    7: '平和', 8: '断幺九', 9: '一盃口', 10: '自風牌', 11: '場風牌', 12: '白', 13: '發', 14: '中',
+    15: 'ドラ', 16: '裏ドラ', 17: '両立直', 18: '白', 19: '發', 20: '中', 21: '混全帯幺九',
+    22: '七対子', 23: '混一色', 24: '純全帯幺九', 25: '混老頭', 26: '小三元', 27: '三色同刻',
+    28: '対々和', 29: '三暗刻', 30: '三槓子', 31: '三色同順', 32: '一気通貫', 33: '二盃口',
+    34: '混一色', 35: '清一色', 36: '人和', 37: '天和', 38: '地和', 39: '大三元', 40: '四暗刻',
+    41: '四暗刻単騎', 42: '緑一色', 43: '清老頭', 44: '九蓮宝燈', 45: '純正九蓮宝燈', 46: '国士無双',
+    47: '国士無双十三面', 48: '小四喜', 49: '大四喜', 50: '字一色', 51: '四槓子', 52: 'ドラ',
+    53: '裏ドラ', 54: '赤ドラ', 55: '八連荘'
+  };
+  function yakuName(id) { return YAKU_NAMES[id] || ('yaku_' + id); }
+  M.yakuName = yakuName;
+  M.decodeTenhouMeld = decodeMeld;
+})();
+
+</script>
+  <script>
+(function () {
+  const MJ = (globalThis.MJ = globalThis.MJ || {});
+  const T = MJ.tiles;
+  const F = (MJ.features = { version: 'obs-v1' });
+  const countIds = (ids) => {
+    const c = new Array(34).fill(0);
+    for (const id of ids || []) c[id >> 2]++;
+    return c;
+  };
+  const normalized = (ids, scale = 4) => countIds(ids).map((n) => Math.min(1, n / scale));
+  const redCounts = (ids) => {
+    const c = new Array(34).fill(0);
+    for (const id of ids || []) if (T.isRed(id)) c[id >> 2] = 1;
+    return c;
+  };
+  const meldCounts = (melds) => normalized((melds || []).flatMap((m) => m.tiles || []), 4);
+  const oneHotLast = (history) => {
+    const out = new Array(34).fill(0);
+    const last = (history || [])[history.length - 1];
+    if (last) out[last.tileId >> 2] = 1;
+    return out;
+  };
+  const oneHotRiichi = (history) => {
+    const out = new Array(34).fill(0);
+    for (let i = (history || []).length - 1; i >= 0; i--) if (history[i].riichi) { out[history[i].tileId >> 2] = 1; break; }
+    return out;
+  };
+  const tsumogiriCounts = (history) => normalized((history || []).filter((d) => d.tsumogiri).map((d) => d.tileId), 4);
+  const doraCounts = (indicators) => {
+    const out = new Array(34).fill(0);
+    for (const id of indicators || []) out[T.doraFromIndicator(id >> 2)]++;
+    return out.map((n) => Math.min(1, n / 4));
+  };
+  const indicatorCounts = (indicators) => {
+    const out = new Array(34).fill(0);
+    for (const id of indicators || []) out[id >> 2] = Math.min(1, out[id >> 2] + 0.25);
+    return out;
+  };
+  const safeCounts = (obs) => {
+    const riichi = (obs.opponents || []).filter((o) => o.riichi);
+    if (!riichi.length) return new Array(34).fill(0);
+    const out = new Array(34).fill(0);
+    for (const o of riichi) {
+      for (let t = 0; t < 34; t++) {
+        if ((o.discardTypes || []).includes(t) || (o.safeTypes || []).includes(t)) out[t]++;
+      }
+    }
+    return out.map((n) => n / riichi.length);
+  };
+
+  const opponentChannel = (index, name, fn) => ({
+    name: `opp${index + 1}_${name}`,
+    fn: (obs) => { const o = obs.opponents.find((x) => x.seat === (obs.seat + index + 1) % 4); return o ? fn(o) : new Array(34).fill(0); }
+  });
+  F.CHANNELS = [
+    { name: 'hand', fn: (o) => normalized(o.hand, 4) },
+    { name: 'hand_red', fn: (o) => redCounts(o.hand) },
+    { name: 'meld_self', fn: (o) => meldCounts(o.melds) },
+    { name: 'dora', fn: (o) => doraCounts(o.doraIndicators) },
+    { name: 'dora_indicator', fn: (o) => indicatorCounts(o.doraIndicators) },
+    { name: 'unseen', fn: (o) => (o.unseen || new Array(34).fill(0)).map((n) => n / 4) },
+    { name: 'river_self', fn: (o) => normalized((o.ownDiscardHistory || []).map((d) => d.tileId), 4) },
+    { name: 'last_self', fn: (o) => oneHotLast(o.ownDiscardHistory) },
+    { name: 'tsumogiri_self', fn: (o) => tsumogiriCounts(o.ownDiscardHistory) },
+    opponentChannel(0, 'river', (o) => normalized((o.discardHistory || []).map((d) => d.tileId), 4)),
+    opponentChannel(0, 'last', (o) => oneHotLast(o.discardHistory)),
+    opponentChannel(0, 'tsumogiri', (o) => tsumogiriCounts(o.discardHistory)),
+    opponentChannel(0, 'riichi_tile', (o) => oneHotRiichi(o.discardHistory)),
+    opponentChannel(0, 'meld', (o) => meldCounts(o.melds)),
+    opponentChannel(1, 'river', (o) => normalized((o.discardHistory || []).map((d) => d.tileId), 4)),
+    opponentChannel(1, 'last', (o) => oneHotLast(o.discardHistory)),
+    opponentChannel(1, 'tsumogiri', (o) => tsumogiriCounts(o.discardHistory)),
+    opponentChannel(1, 'riichi_tile', (o) => oneHotRiichi(o.discardHistory)),
+    opponentChannel(1, 'meld', (o) => meldCounts(o.melds)),
+    opponentChannel(2, 'river', (o) => normalized((o.discardHistory || []).map((d) => d.tileId), 4)),
+    opponentChannel(2, 'last', (o) => oneHotLast(o.discardHistory)),
+    opponentChannel(2, 'tsumogiri', (o) => tsumogiriCounts(o.discardHistory)),
+    opponentChannel(2, 'riichi_tile', (o) => oneHotRiichi(o.discardHistory)),
+    opponentChannel(2, 'meld', (o) => meldCounts(o.melds)),
+    { name: 'safe_vs_riichi', fn: (o) => safeCounts(o) }
+  ];
+
+  F.GLOBAL_NAMES = ['score0', 'score1', 'score2', 'score3', 'diff0', 'diff1', 'diff2', 'diff3',
+    'wind_e', 'wind_s', 'wind_w', 'wind_n', 'dealer', 'south_round', 'honba', 'riichi_sticks',
+    'live_remaining', 'turn', 'hands_left', 'riichi0', 'riichi1', 'riichi2', 'riichi3',
+    'threat', 'furiten', 'open_melds_opp0', 'open_melds_opp1', 'open_melds_opp2',
+    'hand_count_opp0', 'hand_count_opp1', 'hand_count_opp2'];
+  function globals(obs) {
+    const scores = obs.scores || [25000, 25000, 25000, 25000];
+    const seat = obs.seat;
+    const values = [];
+    for (let s = 0; s < 4; s++) values.push((scores[s] - 25000) / 100000);
+    for (let s = 0; s < 4; s++) values.push((scores[seat] - scores[s]) / 100000);
+    const wind = obs.seatWind != null ? obs.seatWind : (obs.seatWinds || [27, 28, 29, 30])[seat];
+    for (let w = 0; w < 4; w++) values.push(wind === 27 + w ? 1 : 0);
+    values.push(obs.isDealer ? 1 : 0);
+    values.push(obs.roundWind === 28 ? 1 : 0);
+    values.push((obs.honba || 0) / 10, (obs.riichiSticks || 0) / 10,
+      (obs.liveRemaining == null ? 70 : obs.liveRemaining) / 70, (obs.turnCount || 0) / 100,
+      (obs.handsLeft == null ? 4 : obs.handsLeft) / 8);
+    const riichi = [0, 0, 0, 0];
+    if (obs.riichi) riichi[seat] = 1;
+    for (const o of obs.opponents || []) if (o.riichi) riichi[o.seat] = 1;
+    for (let s = 0; s < 4; s++) values.push(riichi[s]);
+    values.push(obs.threat ? 1 : 0, obs.furiten ? 1 : 0);
+    for (let i = 0; i < 3; i++) {
+      const o = (obs.opponents || []).find((x) => x.seat === (seat + i + 1) % 4);
+      values.push(o ? (o.melds || []).filter((m) => m.open).length / 4 : 0);
+    }
+    for (let i = 0; i < 3; i++) {
+      const o = (obs.opponents || []).find((x) => x.seat === (seat + i + 1) % 4);
+      values.push(o ? (o.handCount || 0) / 14 : 0);
+    }
+    return values;
+  }
+
+  F.encode = function (obs) {
+    if (!obs || !Array.isArray(obs.hand)) throw new Error('features.encode requires an observation');
+    const tiles = 34, channels = F.CHANNELS.length, g = globals(obs);
+    const data = new Float32Array(channels * tiles + g.length);
+    F.CHANNELS.forEach((channel, c) => {
+      const values = channel.fn(obs);
+      if (!Array.isArray(values) || values.length !== tiles) throw new Error('Invalid feature channel: ' + channel.name);
+      for (let t = 0; t < tiles; t++) data[c * tiles + t] = Number.isFinite(values[t]) ? values[t] : 0;
+    });
+    for (let i = 0; i < g.length; i++) data[channels * tiles + i] = Number.isFinite(g[i]) ? g[i] : 0;
+    return { version: F.version, shape: { channels, tiles, globals: g.length },
+      channelNames: F.CHANNELS.map((c) => c.name), globalNames: F.GLOBAL_NAMES.slice(), data };
+  };
+
+  function labelOf(event, options) {
+    const action = event.action;
+    if (event.type === 'discard') return { kind: 'discard', tile: event.tileId >> 2, riichi: !!event.riichi, tsumogiri: !!event.tsumogiri };
+    if (!action) return { kind: 'pass' };
+    if (action.type === 'ron') return { kind: 'ron' };
+    if (action.type === 'pon') return { kind: 'pon', tile: event.tileId >> 2 };
+    if (action.type === 'kan') return { kind: 'kan', tile: event.tileId >> 2 };
+    if (action.type === 'chi') return { kind: 'chi', tile: event.tileId >> 2, tiles: action.tiles.slice() };
+    return { kind: action.type };
+  }
+
+  // Deterministic supervised samples from a 翠卓 record. The observation is taken
+  // immediately before the action, so opponent hands and the wall are never encoded.
+  F.dataset = function (record, opts = {}) {
+    if (!record || !Array.isArray(record.hands)) throw new Error('features.dataset requires a 翠卓 record');
+    const samples = [], limit = Number.isFinite(opts.limit) ? opts.limit : Infinity;
+    for (let h = 0; h < record.hands.length; h++) {
+      const hand = record.hands[h];
+      for (let i = 0; i < hand.events.length; i++) {
+        const event = hand.events[i];
+        if (event.type === 'end' && event.result && event.result.type === 'win' && event.result.tsumo) {
+          const game = MJ.record.snapshot(hand, i - 1);
+          const seat = event.result.winner;
+          const obs = game.getObservation(seat);
+          obs.furiten = game.isFuriten(seat);
+          samples.push({ hand: h, eventIndex: i, seat, x: F.encode(obs),
+            label: { kind: 'tsumo', tile: event.result.winTile >> 2 },
+            meta: { version: F.version, hand: h, eventIndex: i, seat, turn: event.turn == null ? game.turnCount : event.turn, kind: 'end', riichi: !!game.players[seat].riichi } });
+          if (samples.length >= limit) return samples;
+          continue;
+        }
+        if (event.type !== 'discard' && event.type !== 'response') continue;
+        const game = MJ.record.snapshot(hand, i - 1);
+        const seat = event.seat;
+        const extra = event.type === 'response'
+          ? { callTile: event.tileId, callType: event.tileId >> 2, callFrom: event.from, isCallDecision: true }
+          : undefined;
+        const obs = game.getObservation(seat, extra);
+        obs.furiten = game.isFuriten(seat);
+        const x = F.encode(obs);
+        const label = labelOf(event, event.options);
+        if (event.type === 'discard') label.forced = !!game.players[seat].riichi;
+        samples.push({ hand: h, eventIndex: i, seat, x, label,
+          meta: { version: F.version, hand: h, eventIndex: i, seat, turn: event.turn == null ? game.turnCount : event.turn,
+            kind: event.type, riichi: !!game.players[seat].riichi } });
+        if (samples.length >= limit) return samples;
+      }
+    }
+    return samples;
+  };
+
+  F.toJSONL = function (samples) {
+    return samples.map((s) => JSON.stringify({ v: s.x.version, hand: s.hand, event: s.eventIndex, seat: s.seat,
+      channels: s.x.channelNames, globals: s.x.globalNames, shape: s.x.shape,
+      x: Array.from(s.x.data), label: s.label, meta: s.meta })).join('\n') + '\n';
+  };
+  F.fromJSONL = function (text) {
+    return String(text).split(/\r?\n/).filter(Boolean).map((line) => {
+      const row = JSON.parse(line);
+      return { hand: row.hand, eventIndex: row.event, seat: row.seat, label: row.label, meta: row.meta,
+        x: { version: row.v, channelNames: row.channels, globalNames: row.globals, shape: row.shape, data: Float32Array.from(row.x) } };
+    });
+  };
+})();
+
+</script>
+  <script>
+(function () {
   const sounds = globalThis.MJ.audio = { enabled: true, context: null, voices: new Map() };
   const names = { riichi: 'リーチ', pon: 'ポン', chi: 'チー', kan: 'カン', ron: 'ロン', tsumo: 'ツモ' };
   sounds.unlock = function () {
@@ -1714,8 +2926,15 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
   const NAMES = ['あなた', 'COM 1', 'COM 2', 'COM 3'];
   const WINDS = ['東', '南', '西', '北'];
   const escape = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  const ui = MJ.ui = { game: null, humanSeat: 0, mode: null, running: false, fast: false, token: 0,
-    record: null, review: null, pending: null, discardResolve: null, riichiWanted: false, level: 'strong' };
+  const ui = MJ.ui = { humanSeat: 0, mode: null, running: false, fast: false, token: 0,
+    record: null, review: null, pending: null, discardResolve: null, riichiWanted: false, level: 'strong', aiWeights: null, rankConfig: 'tenhou' };
+  // The raw game object stays in this closure. It is exposed only to automated tests,
+  // never as a normal console-accessible property in the built page.
+  let currentGame = null;
+  Object.defineProperty(ui, 'game', {
+    get() { return globalThis.__SUITAKU_DEBUG__ === true ? currentGame : null; },
+    set(value) { currentGame = value; }, configurable: true
+  });
   const button = (label, action, cls) => { const b = document.createElement('button'); b.textContent = label; b.onclick = action; if (cls) b.className = cls; return b; };
   function toast(message) {
     $('toast').textContent = message; $('toast').classList.add('visible');
@@ -1723,20 +2942,32 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
   }
   function tileEl(type, opts = {}) {
     const d = document.createElement(opts.clickable ? 'button' : 'div');
-    d.className = 'tile ' + T.suitOf(type) + (type >= 27 ? ' h' + type : '') +
-      ['small', 'mini', 'back', 'clickable', 'dim', 'red', 'drawn'].filter((c) => opts[c]).map((c) => ' ' + c).join('') + (opts.highlight ? ' tsumo-highlight' : '');
-    d.title = opts.back ? '裏向きの牌' : (opts.red ? '赤' : '') + T.label(type);
-    d.setAttribute('aria-label', d.title);
-    if (!opts.back) {
-      const glyph = document.createElement('span'); glyph.className = 'glyph';
-      glyph.textContent = type < 9 ? 'qwertyuio'[type] : type < 18 ? 'zxcvbnm,.'[type - 9] : type < 27 ? 'asdfghjkl'[type - 18] : '1234567'[type - 27];
-      glyph.setAttribute('aria-hidden', 'true'); d.appendChild(glyph);
+    if (opts.back) {
+      // A face-down tile must not carry its suit, honor index, red flag or name in the DOM.
+      d.className = 'tile back' + ['small', 'mini'].filter((c) => opts[c]).map((c) => ' ' + c).join('');
+      d.title = '伏せ牌';
+      d.setAttribute('aria-label', d.title);
+      if (opts.clickable) d.onclick = opts.onClick;
+      if (opts.sideways) { const slot = document.createElement('span'); slot.className = 'sideways-slot'; slot.appendChild(d); return slot; }
+      return d;
     }
+    d.className = 'tile ' + T.suitOf(type) + (type >= 27 ? ' h' + type : '') +
+      ['small', 'mini', 'clickable', 'dim', 'red', 'drawn'].filter((c) => opts[c]).map((c) => ' ' + c).join('') + (opts.highlight ? ' tsumo-highlight' : '');
+    d.title = (opts.red ? '赤' : '') + T.label(type);
+    d.setAttribute('aria-label', d.title);
+    const glyph = document.createElement('span'); glyph.className = 'glyph';
+    glyph.textContent = type < 9 ? 'qwertyuio'[type] : type < 18 ? 'zxcvbnm,.'[type - 9] : type < 27 ? 'asdfghjkl'[type - 18] : '1234567'[type - 27];
+    glyph.setAttribute('aria-hidden', 'true'); d.appendChild(glyph);
     if (opts.clickable) d.onclick = opts.onClick;
     if (opts.sideways) { const slot = document.createElement('span'); slot.className = 'sideways-slot'; slot.appendChild(d); return slot; }
     return d;
   }
-  function appendTile(parent, id, opts) { return parent.appendChild(tileEl(id >> 2, { red: T.isRed(id), ...opts })); }
+  function appendTile(parent, id, opts = {}) {
+    const merged = { ...opts };
+    if (merged.back) { delete merged.red; delete merged.highlight; }
+    else merged.red = T.isRed(id);
+    return parent.appendChild(tileEl(id >> 2, merged));
+  }
   function appendLog(msg, data) {
     const div = document.createElement('div');
     div.textContent = msg.replace(/P([1-4])/g, (_, s) => NAMES[Number(s) - 1]);
@@ -1746,28 +2977,41 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
     }
     $('log').appendChild(div); $('log').scrollTop = $('log').scrollHeight;
   }
-  function renderSeat(seat, game) {
-    const el = $('seat-' + seat), p = game.players[seat]; el.innerHTML = '';
-    const human = seat === 0;
-    el.classList.toggle('active', game.currentSeat === seat && !game.ended);
+  function seatObservation(obs, seat) {
+    if (seat === obs.seat) return { own: true, hand: obs.hand, handCount: obs.hand.length, melds: obs.melds,
+      drawnTile: obs.drawnTile, riichi: obs.riichi, score: obs.score, isDealer: obs.isDealer,
+      forbidden: obs.forbidden, discardHistory: obs.ownDiscardHistory };
+    const o = (obs.opponents || []).find((x) => x.seat === seat) || {};
+    return { own: false, hand: o.hand, handCount: o.handCount, melds: o.melds || [], drawnTile: null,
+      riichi: o.riichi, score: o.score, isDealer: o.isDealer, forbidden: [], discardHistory: o.discardHistory || [] };
+  }
+  function renderSeat(seat, obs, game) {
+    const el = $('seat-' + seat), p = seatObservation(obs, seat); el.innerHTML = '';
+    const human = seat === ui.humanSeat;
+    el.classList.toggle('active', obs.currentSeat === seat && !obs.ended);
     const head = document.createElement('div'); head.className = 'seat-head';
-    head.innerHTML = `<span class="wind">${WINDS[game.seatWindOf(seat) - 27]}</span><span>${NAMES[seat]}</span><span class="score">${p.score.toLocaleString()}</span>` +
+    head.innerHTML = `<span class="wind">${WINDS[obs.seatWinds[seat] - 27]}</span><span>${NAMES[seat]}</span><span class="score">${p.score.toLocaleString()}</span>` +
       (p.riichi ? '<span class="riichi-flag">● リーチ</span>' : '');
     const row = document.createElement('div'); row.className = 'hand-row';
-    const reveal = human || (ui.review && ui.review.reveal) || (game.ended && game.result && (game.result.winner === seat || (game.result.tenpai || []).includes(seat)));
-    const ids = MJ.sortHand(p.hand.filter((id) => id !== p.drawnTile));
-    // The draw is always at the player's own left edge, including rotated opponents.
-    if (p.drawnTile != null) ids.unshift(p.drawnTile);
-    for (const id of ids) {
-      const drawn = id === p.drawnTile;
-      const legal = !p.forbidden.includes(id >> 2) && (!p.riichi || drawn) && (!ui.riichiWanted || game.waits(seat, p.hand.filter((x) => x !== id)).length > 0);
-      appendTile(row, id, { back: !reveal, drawn, clickable: human && ui.mode === 'discard' && legal && !ui.review,
-        highlight: human && drawn && ui.mode === 'discard', dim: human && ui.mode === 'discard' && !legal,
-        onClick: () => onTileClick(id) });
+    const reveal = p.own || !!obs.revealAll || (obs.ended && obs.result && (obs.result.winner === seat || (obs.result.tenpai || []).includes(seat)));
+    if (reveal && Array.isArray(p.hand)) {
+      const ids = MJ.sortHand(p.hand.filter((id) => id !== p.drawnTile));
+      // The draw is always at the player's own left edge, including rotated opponents.
+      if (p.drawnTile != null) ids.unshift(p.drawnTile);
+      for (const id of ids) {
+        const drawn = id === p.drawnTile;
+        const legal = p.own && !p.forbidden.includes(id >> 2) && (!p.riichi || drawn) &&
+          (!ui.riichiWanted || game.waits(seat, p.hand.filter((x) => x !== id)).length > 0);
+        appendTile(row, id, { back: false, drawn, clickable: human && ui.mode === 'discard' && legal && !ui.review,
+          highlight: human && p.own && drawn && ui.mode === 'discard', dim: human && p.own && ui.mode === 'discard' && !legal,
+          onClick: () => onTileClick(id) });
+      }
+    } else {
+      for (let i = 0; i < (p.handCount || 0); i++) appendTile(row, 0, { back: true });
     }
     el.appendChild(head); el.appendChild(row);
     const mr = document.createElement('div'); mr.className = 'melds-row';
-    for (const m of p.melds) {
+    for (const m of p.melds || []) {
       const md = document.createElement('div'); md.className = 'meld';
       const tiles = m.tiles.filter((id) => id !== m.addedTile);
       if (m.open && m.calledTile != null) {
@@ -1788,12 +3032,12 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
     }
     el.appendChild(mr);
   }
-  function renderRiver(seat, game) {
+  function renderRiver(seat, obs) {
     const root = $('river-' + seat); root.innerHTML = '';
-    const p = game.players[seat]; let row;
+    const p = seatObservation(obs, seat); let row;
     let pendingRiichi = false;
     const visible = [];
-    for (const d of p.discardHistory) {
+    for (const d of p.discardHistory || []) {
       if (d.riichi) pendingRiichi = true;
       if (d.called) continue;
       visible.push({ ...d, sideways: pendingRiichi }); pendingRiichi = false;
@@ -1803,26 +3047,26 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
       const el = appendTile(row, d.tileId, { mini: true, sideways: d.sideways });
       const tile = d.sideways ? el.firstChild : el;
       if (d.tsumogiri) tile.classList.add('tsumogiri');
-      if (game.lastDiscard && game.lastDiscard.tileId === d.tileId) tile.classList.add('latest');
+      if (obs.lastDiscard && obs.lastDiscard.tileId === d.tileId) tile.classList.add('latest');
       tile.title += ` · ${d.tsumogiri ? 'ツモ切り' : '手出し'}${d.riichi ? ' · リーチ宣言' : ''} · #${d.eventIndex}`;
     });
   }
-  function guide(game) {
+  function guide(obs, game) {
     const root = $('hand-guide'); root.innerHTML = '';
     if (!$('show-guide').checked) { root.textContent = '手牌ガイドはオフです'; return; }
-    const p = game.players[0], counts = T.countsFromIds(p.hand);
-    const sh = MJ.shanten.shanten(counts, p.melds.length);
+    const counts = T.countsFromIds(obs.hand);
+    const sh = MJ.shanten.shanten(counts, obs.melds.length);
     root.textContent = sh < 0 ? '和了形' : sh === 0 ? 'テンパイ' : `${sh} 向聴`;
-    if (p.hand.length % 3 === 1 && sh === 0) {
-      const waits = game.waits(0), unseen = game.computeUnseen(0), row = document.createElement('div'); row.className = 'guide-tiles';
+    if (obs.hand.length % 3 === 1 && sh === 0) {
+      const waits = obs.waits || game.waits(obs.seat), unseen = obs.unseen, row = document.createElement('div'); row.className = 'guide-tiles';
       for (const t of waits) row.appendChild(tileEl(t, { mini: true }));
       root.appendChild(row);
       const note = document.createElement('div'); note.className = 'muted';
-      note.textContent = `未見 ${waits.reduce((n, t) => n + unseen[t], 0)}枚${game.isFuriten(0) ? ' / フリテン' : ''}`; root.appendChild(note);
+      note.textContent = `未見 ${waits.reduce((n, t) => n + unseen[t], 0)}枚${obs.furiten ?? game.isFuriten(obs.seat) ? ' / フリテン' : ''}`; root.appendChild(note);
     }
   }
-  function animateDiscard(game) {
-    const d = game.lastDiscard;
+  function animateDiscard(obs) {
+    const d = obs.lastDiscard;
     if (!d || ui.review) return;
     // Re-renders must not restart the same discard animation.
     const key = d.eventIndex + ':' + d.tileId;
@@ -1840,26 +3084,27 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
       a.onfinish = () => { flight.innerHTML = ''; };
     }
   }
-  function render(game = ui.game) {
+  function render(game = currentGame) {
     if (!game || !game.players) return;
+    const obs = game.getObservation(ui.humanSeat, { ui: true, revealAll: !!(ui.review && ui.review.reveal) });
     $('table').classList.toggle('review-mode', !!ui.review);
-    $('wall-info').innerHTML = `${game.liveRemaining()}<small>枚</small>`;
-    $('wall-meter-fill').style.width = game.liveRemaining() / 70 * 100 + '%';
-    $('round-info').textContent = `${WINDS[game.roundWind - 27]}${game.dealer + 1}局 ${game.honba}本場`;
+    $('wall-info').innerHTML = `${obs.liveRemaining}<small>枚</small>`;
+    $('wall-meter-fill').style.width = obs.liveRemaining / 70 * 100 + '%';
+    $('round-info').textContent = `${WINDS[obs.roundWind - 27]}${obs.dealer + 1}局 ${obs.honba}本場`;
     const di = $('dora-info'); di.innerHTML = '';
     for (let i = 0; i < 5; i++) {
-      const id = game.doraIndicators[i];
+      const id = obs.doraIndicators[i];
       di.appendChild(tileEl(id == null ? 0 : id >> 2, { small: true, back: id == null, red: id != null && T.isRed(id) }));
     }
-    $('center').innerHTML = `<span class="center-tag">${ui.review ? 'REPLAY' : ui.record && ui.record.mode === 'hanchan' ? 'HANCHAN' : 'TONPU'}</span><div class="center-round">${WINDS[game.roundWind - 27]} ${game.dealer + 1} 局</div><div class="center-remaining">${game.liveRemaining()}<small>枚</small></div><div class="info-line"><span>${game.honba} 本場</span><span>供託 ${game.riichiSticks}</span></div>`;
-    for (let s = 0; s < 4; s++) { renderSeat(s, game); renderRiver(s, game); }
-    guide(game); animateDiscard(game);
+    $('center').innerHTML = `<span class="center-tag">${ui.review ? 'REPLAY' : ui.record && ui.record.mode === 'hanchan' ? 'HANCHAN' : 'TONPU'}</span><div class="center-round">${WINDS[obs.roundWind - 27]} ${obs.dealer + 1} 局</div><div class="center-remaining">${obs.liveRemaining}<small>枚</small></div><div class="info-line"><span>${obs.honba} 本場</span><span>供託 ${obs.riichiSticks}</span></div>`;
+    for (let s = 0; s < 4; s++) { renderSeat(s, obs, game); renderRiver(s, obs); }
+    guide(obs, game); animateDiscard(obs);
   }
   function onTileClick(id) {
     if (!ui.discardResolve || ui.mode !== 'discard') return;
-    const p = ui.game.players[0];
+    const p = ui.view;
     if (p.forbidden.includes(id >> 2) || (p.riichi && id !== p.drawnTile)) return;
-    if (ui.riichiWanted && !ui.game.waits(0, p.hand.filter((x) => x !== id)).length) return;
+    if (ui.riichiWanted && !currentGame.waits(ui.humanSeat, p.hand.filter((x) => x !== id)).length) return;
     const resolve = ui.discardResolve, riichi = ui.riichiWanted;
     ui.discardResolve = null; ui.pending = null; ui.mode = null;
     $('controls').innerHTML = '<span class="hint">COM の思考中…</span>';
@@ -1876,10 +3121,11 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
       const token = ui.token, view = ui.view;
       toast('候補を計算しています…');
       await new Promise((r) => setTimeout(r, 20));
-      const d = await MJ.ai.create(0, { level: ui.level }).chooseDiscard(view);
+      const d = await MJ.ai.create(0, { level: ui.level, weights: ui.aiWeights || undefined }).chooseDiscard(view);
       if (token !== ui.token || ui.mode !== 'discard') return;
       const best = d.analysis && d.analysis.candidates && d.analysis.candidates[0];
-      toast(`推奨：${T.label(d.tileId >> 2)}${best ? ` / ${best.sh}向聴・受入${best.ukeire}枚` : '（リーチ中）'}${d.riichi ? ' / リーチ' : ''}`);
+      const routeLabel = best && best.route === 'chiitoi' ? '（七対子）' : best && best.route === 'kokushi' ? '（国士）' : '';
+      toast(`推奨：${T.label(d.tileId >> 2)}${best ? ` / ${best.sh}向聴${routeLabel}・受入${best.ukeire}枚` : '（リーチ中）'}${d.riichi ? ' / リーチ' : ''}`);
     }));
   }
   function askChoice(question, choices, token) {
@@ -1929,7 +3175,7 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
     };
   }
   function pacedAI(seat, token) {
-    const ai = MJ.ai.create(seat, { level: ui.level }), out = {};
+    const ai = MJ.ai.create(seat, { level: ui.level, weights: ui.aiWeights || undefined }), out = {};
     for (const fn of ['wantTsumo', 'chooseDiscard', 'wantCall', 'wantKan']) out[fn] = async (...args) => {
       await new Promise((r) => setTimeout(r, ui.fast ? 0 : fn === 'chooseDiscard' ? 400 : 100));
       if (token !== ui.token) return fn === 'chooseDiscard' ? { tileId: args[0].hand[0] } : null;
@@ -1952,7 +3198,7 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
   }
   function stop() {
     ui.token++; ui.running = false; ui.mode = null; ui.review = null; ui.waitingResult = false;
-    if (ui.game) ui.game.cancelled = true;
+    if (currentGame) currentGame.cancelled = true;
     if (ui.pending) ui.pending(); if (ui.resultResolve) ui.resultResolve();
     ui.pending = null; ui.discardResolve = null; ui.resultResolve = null;
     $('review-controls').classList.add('hidden');
@@ -1969,13 +3215,17 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
     grid.appendChild(east); grid.appendChild(south); p.appendChild(grid);
     const label = document.createElement('label'); label.className = 'field'; label.textContent = '対戦AI'; p.appendChild(label);
     const select = document.createElement('select'); select.innerHTML = '<option value="strong">思考型 — 先読み・牌効率・押し引き</option><option value="standard">標準 — 向聴数・受入枚数重視</option>'; select.value = ui.level; p.appendChild(select);
+    const weightsRow = document.createElement('p'); weightsRow.className = 'muted';
+    weightsRow.appendChild(button(ui.aiWeights ? 'AIの重みを差し替え' : '学習済みのAI重みを読み込む（任意）', () => $('weights-file').click(), 'text-button'));
+    if (ui.aiWeights) weightsRow.appendChild(document.createTextNode(' 学習済みの重みを使用中'));
+    p.appendChild(weightsRow);
     const note = document.createElement('p'); note.textContent = '25,000点持ち / 赤5各1枚 / 頭ハネ / 親テンパイ連荘。ツモ牌は各プレイヤーから見て左端に置きます。'; p.appendChild(note);
-    actions(p, [{ label: '牌譜を読み込む', action: () => $('replay-file').click() }, { label: '対局をはじめる →', primary: true, action: () => { MJ.audio.unlock(); ui.level = select.value; closePanel(); startMatch(mode); } }]);
+    actions(p, [{ label: '牌譜を読み込む（JSON / mjai / 天鳳）', action: () => $('replay-file').click() }, { label: '対局をはじめる →', primary: true, action: () => { MJ.audio.unlock(); ui.level = select.value; closePanel(); startMatch(mode); } }]);
   }
   function rules() {
     const wasHidden = $('overlay').classList.contains('hidden');
     const p = panel('<div class="eyebrow">HOW TO PLAY</div><h2>ルールと操作</h2><ul class="rule-list"><li>手牌をクリックして打牌。リーチはボタンを押してから宣言牌を選択。</li><li>ツモ牌は自分から見て左端。河の小さな点はツモ切り、金枠は直前の捨て牌。</li><li>四人打ち・東風 / 半荘。赤各1枚、喰いタン・後付けあり。喰い替えは禁止。</li><li>複数ロンは頭ハネ。親の和了・テンパイで連荘。流局ごとに本場が増えます。</li><li>飛び終了あり。オーラスの和了やめ・西入 / 南入なし。残った供託はトップへ。</li><li>四風連打・四人リーチ・複数人の四槓は流局。九種九牌・流し満貫は採用していません。</li><li>ダブル役満は大四喜・四暗刻単騎ロン。数え役満あり、役満は複合加算。</li><li>JSON牌譜は全牌山、手牌、ツモ切り、AI評価、検討メモを含みます。読み込むと一手ずつ再生できます。</li></ul><p>牌字：GL-MahjongTile © Gutenberg Labo<br>AIは公開情報を用いた探索・評価型です。</p>');
-    actions(p, [{ label: '閉じる', primary: true, action: () => { closePanel(); if (ui.waitingResult) showResultPanel(ui.game, ui.game.result); else if (!wasHidden && !ui.running) lobby(); } }]);
+    actions(p, [{ label: '閉じる', primary: true, action: () => { closePanel(); if (ui.waitingResult) showResultPanel(currentGame, currentGame.result); else if (!wasHidden && !ui.running) lobby(); } }]);
   }
   function download(name, text, type) {
     const url = URL.createObjectURL(new Blob([text], { type })), a = document.createElement('a');
@@ -1987,11 +3237,11 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
     const name = 'suitaku-' + ui.record.createdAt.replace(/[:.]/g, '-');
     const save = (json) => { download(name + (json ? '.json' : '.txt'), json ? JSON.stringify(ui.record, null, 2) : MJ.record.text(ui.record), json ? 'application/json' : 'text/plain'); };
     actions(p, [{ label: 'JSON（再生・検討用）', primary: true, action: () => save(true) }, { label: 'テキスト', action: () => save(false) }]);
-    actions(p, [{ label: '閉じる', action: () => { closePanel(); if (ui.waitingResult) showResultPanel(ui.game, ui.game.result); else if (!ui.running && !ui.review) lobby(); } }]);
+    actions(p, [{ label: '閉じる', action: () => { closePanel(); if (ui.waitingResult) showResultPanel(currentGame, currentGame.result); else if (!ui.running && !ui.review) lobby(); } }]);
   }
   function annotate() {
-    if (!ui.record || !ui.game || !ui.game.lastDiscard) { toast('打牌後にメモを残せます'); return; }
-    const d = ui.game.lastDiscard, hand = ui.review ? ui.review.hand : ui.record.hands.length - 1;
+    if (!ui.record || !currentGame || !currentGame.lastDiscard) { toast('打牌後にメモを残せます'); return; }
+    const d = currentGame.lastDiscard, hand = ui.review ? ui.review.hand : ui.record.hands.length - 1;
     const p = panel(`<div class="eyebrow">REVIEW NOTE</div><h2>打牌に検討メモ</h2><p>局 #${hand + 1} / イベント #${d.eventIndex} / ${NAMES[d.seat]} ${T.label(d.tileId >> 2)}</p>`);
     const input = document.createElement('textarea'); input.rows = 5; input.placeholder = '例：ここはドラを残して、現物の東を切るほうがよいのでは？'; p.appendChild(input);
     actions(p, [{ label: '戻る', action: closePanel }, { label: '牌譜に記録', primary: true, action: () => {
@@ -2034,9 +3284,9 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
       while (!state.ended && token === ui.token) {
         const game = new MJ.Game({ agents: [humanAgent(token), pacedAI(1, token), pacedAI(2, token), pacedAI(3, token)],
           onUpdate: () => { if (token === ui.token) render(game); }, onEvent: (msg, data) => { if (token === ui.token) { appendLog(msg, data); if (data?.type) MJ.audio.play(data.type); } } });
-        ui.game = game; ui.animationKey = null; ui.waitingResult = false;
+        currentGame = game; ui.animationKey = null; ui.waitingResult = false;
         appendLog(`── ${state.hand < 4 ? '東' : '南'}${state.dealer + 1}局 ${state.honba}本場 ──`);
-        const playing = game.playHand({ roundWind: 27 + Math.floor(state.hand / 4), dealer: state.dealer, honba: state.honba, riichiSticks: sticks, scores: scores.slice() });
+        const playing = game.playHand({ roundWind: 27 + Math.floor(state.hand / 4), dealer: state.dealer, honba: state.honba, riichiSticks: sticks, scores: scores.slice(), hand: state.hand, mode: state.mode });
         ui.record.hands.push(game.recording);
         const res = await playing;
         if (token !== ui.token || !res) return;
@@ -2049,8 +3299,13 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
       if (token !== ui.token) return;
       const ranked = scores.map((score, seat) => ({ score, seat })).sort((a, b) => b.score - a.score || a.seat - b.seat);
       if (sticks) { scores[ranked[0].seat] += sticks * 1000; ranked[0].score += sticks * 1000; }
-      ui.record.finalScores = scores; ui.record.finished = true; autosave(); ui.running = false;
-      const p = panel('<div class="eyebrow">MATCH COMPLETE</div><h2>終局</h2>' + ranked.map((r, i) => `<div class="ranking-row"><span>${i + 1}位　${NAMES[r.seat]}</span><strong>${r.score.toLocaleString()} 点</strong></div>`).join(''));
+      const settled = MJ.rank.finalResult(scores, ui.rankConfig);
+      ui.record.finalScores = scores; ui.record.finalRankPoints = settled.points;
+      ui.record.rankConfig = { name: settled.config.name, uma: settled.config.uma, startScore: settled.config.startScore,
+        returnScore: settled.config.returnScore, scoreUnit: settled.config.scoreUnit, scoreWeight: settled.config.scoreWeight };
+      ui.record.finished = true; autosave(); ui.running = false;
+      const rows = settled.order.map((seat, i) => `<div class="ranking-row"><span>${i + 1}位　${NAMES[seat]}</span><strong>${scores[seat].toLocaleString()} 点 <small>${settled.points[seat] >= 0 ? '+' : ''}${settled.points[seat]} pt</small></strong></div>`).join('');
+      const p = panel('<div class="eyebrow">MATCH COMPLETE</div><h2>終局</h2>' + rows + `<p class="muted">順位点：${settled.config.name} / ウマ ${settled.config.uma.join('・')}</p>`);
       actions(p, [{ label: '牌譜を保存', action: exportRecord }, { label: '牌譜を検討', action: () => startReview(ui.record) }, { label: '新しい対局', primary: true, action: lobby }]);
     } catch (err) {
       if (token !== ui.token) return;
@@ -2105,7 +3360,10 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
       const scroll = document.createElement('div'); scroll.className = 'analysis-scroll'; scroll.appendChild(table); root.appendChild(scroll);
       if (modern) {
         const best = candidates[0], note = document.createElement('p'); note.className = 'muted';
-        note.textContent = `${best.blocks}ブロック候補 / 雀頭${best.blockPlans.head ? 'あり' : 'なし'} / 次ツモ後平均受入 ${best.futureUkeire ?? '—'}枚。¹放銃率・期待収支は公開情報からのモデル推定（実測値ではありません）。`; root.appendChild(note);
+        const plan = best.route === 'chiitoi' ? `${best.blocks}対子（七対子ルート）`
+          : best.route === 'kokushi' ? '国士無双ルート'
+          : `${best.blocks}ブロック候補 / 雀頭${best.blockPlans.head ? 'あり' : 'なし'}`;
+        note.textContent = `${plan} / 次ツモ後平均受入 ${best.futureUkeire ?? '—'}枚。¹放銃率・期待収支は公開情報からのモデル推定（実測値ではありません）。`; root.appendChild(note);
       }
     }
     if (analysis.unseen) {
@@ -2137,7 +3395,7 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
   function renderReview() {
     const r = ui.review, h = ui.record.hands[r.hand];
     r.position = Math.max(0, Math.min(r.position, h.events.length - 1));
-    ui.game = MJ.record.snapshot(h, r.position); render();
+    currentGame = MJ.record.snapshot(h, r.position); render();
     renderTimeline(h);
     const root = $('review-controls'); root.classList.remove('hidden'); root.innerHTML = '<div class="section-label">REPLAY <span>牌譜検討</span></div>';
     const select = document.createElement('select');
@@ -2195,12 +3453,42 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
       actions(p, [{ label: '対局に戻る', action: closePanel }, { label: '牌譜を保存', action: exportRecord }, { label: '新規対局', primary: true, action: () => { autosave(); stop(); lobby(); } }]);
     };
     $('btn-rules').onclick = rules; $('btn-export').onclick = exportRecord; $('btn-note').onclick = annotate;
-    $('show-guide').onchange = () => { if (ui.game) guide(ui.game); };
+    $('show-guide').onchange = () => { if (currentGame) render(); };
     $('speed-fast').onchange = () => { ui.fast = $('speed-fast').checked; };
     $('replay-file').onchange = async (e) => {
       const file = e.target.files[0]; if (!file) return;
-      try { if (file.size > 30 * 1024 * 1024) throw new Error('牌譜は30MB以下にしてください'); const data = JSON.parse(await file.text()); startReview(data); }
-      catch (err) { toast(err.message); } finally { e.target.value = ''; }
+      try {
+        if (file.size > 30 * 1024 * 1024) throw new Error('牌譜は30MB以下にしてください');
+        const text = await file.text(), lower = file.name.toLowerCase();
+        let data = null, external = false;
+        if (text.trimStart().startsWith('<') || lower.endsWith('.mjlog') || lower.endsWith('.xml')) {
+          data = MJ.mjai.toSuitaku(MJ.mjai.fromTenhou(text), { source: 'tenhou' }); external = true;
+        } else {
+          try { data = JSON.parse(text); } catch (_) {}
+          if (!data || !Array.isArray(data.hands)) {
+            data = MJ.mjai.toSuitaku(MJ.mjai.parse(text), { source: 'mjai' }); external = true;
+          }
+        }
+        if (external) {
+          const check = MJ.mjai.validate(data);
+          if (!check.ok) toast('読み込み時の警告：' + check.warnings[0]);
+        }
+        startReview(data);
+      } catch (err) { toast('読み込みできませんでした：' + err.message); }
+      finally { e.target.value = ''; }
+    };
+    $('weights-file').onchange = async (e) => {
+      const file = e.target.files[0]; if (!file) return;
+      try {
+        const data = JSON.parse(await file.text());
+        const source = data && data.weights ? data.weights : data, next = {};
+        let count = 0;
+        for (const key of Object.keys(MJ.ai.weights)) if (Number.isFinite(source[key])) { next[key] = source[key]; count++; }
+        if (!count) throw new Error('AIの重みファイルの形式が正しくありません');
+        ui.aiWeights = MJ.ai.setWeights(next);
+        toast(`AIの重みを読み込みました（${count}項目）`);
+        lobby();
+      } catch (err) { toast(err.message); } finally { e.target.value = ''; }
     };
     for (let i = 0; i < 5; i++) $('dora-info').appendChild(tileEl(0, { small: true, back: true }));
     lobby();

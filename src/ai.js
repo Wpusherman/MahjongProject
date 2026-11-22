@@ -1,6 +1,20 @@
 (function () {
   const MJ = globalThis.MJ, T = MJ.tiles, S = MJ.shanten;
-  const AI = MJ.ai = { version: 'public-search-3' };
+  const AI = MJ.ai = { version: 'public-search-4' };
+  // Tunable heuristic weights. The defaults reproduce the hand-tuned public-search-4 AI.
+  const W = AI.weights = {
+    shantenCost: 125, ukeireGain: 1.25, shapeGain: 2.4, grossWeight: 0.035,
+    spareFive: 0.38, spareLow: 0.8, headBonus: 3.0, secondPairBonus: 1.4, pairYakuhai: 0.35,
+    growthHonor: 0.14, growthHonorPair: 0.16, growthNumber: 0.24,
+    growthNeighbor: 0.8, growthKabe: 0.36, growthEdge: 0.43,
+    survivalBase: 0.027, survivalThreat: 0.075,
+    dangerScale: 1.0, dangerPoints: 1.0,
+    pushMargin: 100, callDefense: 180, callDeltaRatio: 0.025, callDeltaMin: 20,
+  };
+  AI.setWeights = function (next) {
+    if (next) for (const key of Object.keys(W)) if (Number.isFinite(next[key])) W[key] = next[key];
+    return { ...W };
+  };
   const sum = (xs) => xs.reduce((a, b) => a + b, 0);
   const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
   const round = (n) => Math.round(n * 100) / 100;
@@ -15,9 +29,24 @@
     return { opponents: [], ownDiscardTypes: [], doraIndicators: [], turnCount: 0, liveRemaining: 60,
       score: 25000, unseen: counts.map((n) => 4 - n), ...view };
   }
+  const HIDDEN_VIEW_KEYS = ['wall', 'liveWall', 'deadWall', 'uraIndicators', 'game', 'players'];
+  // The AI may only consume a public observation. These keys belong to the raw game state.
+  AI.assertObservation = function (view) {
+    if (!view || typeof view !== 'object') throw new Error('AI requires an observation');
+    for (const key of HIDDEN_VIEW_KEYS) if (key in view) throw new Error('AI observation leaked hidden state: ' + key);
+    for (const o of view.opponents || []) if ('hand' in o) throw new Error('AI observation leaked an opponent hand');
+    return view;
+  };
+  // Rank-point pressure: leaders value a point lost more than a point gained,
+  // trailers need to push. Without standings information this is neutral.
+  function rankBias(view) {
+    if (!MJ.rank || !Array.isArray(view.scores) || view.scores.length !== 4 || view.handsLeft == null) return 1;
+    try { return MJ.rank.riskBias(view.scores, view.seat, view.rankConfig, { handsLeft: view.handsLeft }); }
+    catch (_) { return 1; }
+  }
 
   // Public-information danger model. These are heuristic probabilities, not calibrated frequencies.
-  AI.risk = function (t, view) {
+  AI.risk = function (t, view, w = AI.weights) {
     let survive = 1, loss = 0;
     const detail = [];
     for (const o of view.opponents || []) {
@@ -53,22 +82,22 @@
       survive *= 1 - p; loss += p * points;
       detail.push({ seat: o.seat, probability: round(p * 100), genbutsu: safe });
     }
-    return { probability: 1 - survive, loss, detail };
+    return { probability: clamp((1 - survive) * w.dangerScale, 0, 1), loss: loss * w.dangerPoints, detail };
   };
 
   // Non-overlapping block decompositions. Keep alternatives with 5 and 6 blocks;
   // count the sixth only as flexibility, never as a fifth usable meld.
-  function blockShape(counts, view, unseen) {
+  function blockShape(counts, view, unseen, w = AI.weights) {
     const c = counts.slice(), groups = [], singles = [], meldCount = view.melds.length;
     let best = null, five = null, six = null;
     function growth(t) {
-      if (t >= 27) return unseen[t] * 0.14 + yakuhai(t, view) * unseen[t] * Math.max(0, unseen[t] - 1) * 0.16 + (t === view.seatWind ? 0.1 : 0);
-      let value = unseen[t] * 0.24;
+      if (t >= 27) return unseen[t] * w.growthHonor + yakuhai(t, view) * unseen[t] * Math.max(0, unseen[t] - 1) * w.growthHonorPair + (t === view.seatWind ? 0.1 : 0);
+      let value = unseen[t] * w.growthNumber;
       for (const delta of [-2, -1, 1, 2]) {
         const x = t + delta;
         if (x < 0 || x >= 27 || Math.floor(x / 9) !== Math.floor(t / 9)) continue;
         const low = Math.min(t, x) % 9;
-        value += unseen[x] * (Math.abs(delta) === 2 ? 0.36 : low >= 1 && low <= 6 ? 0.8 : 0.43);
+        value += unseen[x] * (Math.abs(delta) === 2 ? w.growthKabe : low >= 1 && low <= 6 ? w.growthNeighbor : w.growthEdge);
       }
       return value;
     }
@@ -80,15 +109,15 @@
       const blocks = groups.length + meldCount;
       let quality = 0;
       const values = incomplete.map((g) => {
-        if (g.kind === 'pair') return unseen[g.t] * (1.0 + yakuhai(g.t, view) * 0.35);
+        if (g.kind === 'pair') return unseen[g.t] * (1.0 + yakuhai(g.t, view) * w.pairYakuhai);
         return g.waits.reduce((n, t) => n + unseen[t], 0) * (g.kind === 'ryanmen' ? 1 : g.kind === 'kanchan' ? 0.82 : 0.68);
       }).sort((a, b) => b - a);
       values.forEach((value, i) => { quality += value * (i < 5 - sets - meldCount ? 1 : 0.12); });
       const spare = singles.map(growth).sort((a, b) => b - a);
       // Spare central tiles can replace bad taatsu even at five blocks.
-      spare.forEach((value, i) => { quality += value * (blocks < 5 ? 0.8 : 0.38) / (i + 1); });
-      if (head) quality += 3.0;
-      if (pairs.length === 2) quality += 1.4; // alternative heads / triplet completion
+      spare.forEach((value, i) => { quality += value * (blocks < 5 ? w.spareLow : w.spareFive) / (i + 1); });
+      if (head) quality += w.headBonus;
+      if (pairs.length === 2) quality += w.secondPairBonus; // alternative heads / triplet completion
       const value = -sh * 100 + quality;
       const plan = { blocks, head, pairs: pairs.length, ryanmen: groups.filter((g) => g.kind === 'ryanmen').length,
         weak: groups.filter((g) => g.kind === 'penchan' || g.kind === 'kanchan').length, quality, sh, value };
@@ -118,6 +147,79 @@
     return { ...best, five: five && round(five.quality), six: six && round(six.quality) };
   }
   AI.blockShape = blockShape;
+
+  // Seven pairs and thirteen orphans are scored as their own plans, so the shape,
+  // acceptance and point estimate always match the route that fixes the shanten.
+  function chiitoiShape(counts, unseen) {
+    let pairs = 0, kinds = 0, growth = 0;
+    for (let t = 0; t < 34; t++) {
+      if (!counts[t]) continue;
+      kinds++;
+      if (counts[t] >= 2) pairs++; else growth += Math.min(unseen[t], 3);
+    }
+    return { blocks: pairs, head: pairs > 0, pairs, ryanmen: 0, weak: 0,
+      quality: pairs * 4 + growth * 0.55, sh: 6 - pairs + Math.max(0, 7 - kinds), five: null, six: null };
+  }
+  function kokushiShape(counts, unseen) {
+    let kinds = 0, pair = 0, growth = 0;
+    for (const t of T.YAOCHU_TYPES) {
+      if (counts[t]) kinds++;
+      if (counts[t] >= 2) pair = 1;
+      if (counts[t] === 1) growth += Math.min(unseen[t], 3);
+    }
+    return { blocks: 0, head: !!pair, pairs: pair, ryanmen: 0, weak: 0,
+      quality: growth * 0.6, sh: 13 - kinds - pair, five: null, six: null };
+  }
+  function closedPoints(han, fu, view) {
+    const pointsAt = (h) => Math.min(8000, MJ.score.limitBase(h, fu * 2 ** (2 + h)) * 4) * (view.isDealer ? 1.5 : 1);
+    return pointsAt(Math.floor(han)) * (1 - han % 1) + pointsAt(Math.ceil(han)) * (han % 1);
+  }
+  function chiitoiValue(counts, view, reds) {
+    let han = 2, simple = true, yaochu = true, honor = false;
+    const suits = new Set();
+    for (let t = 0; t < 34; t++) if (counts[t]) {
+      if (!T.isSimple(t)) simple = false;
+      if (!T.isYaochu(t)) yaochu = false;
+      if (T.isHonor(t)) honor = true; else suits.add(T.suitOf(t));
+    }
+    if (simple) han += 1;
+    if (yaochu) han += 2;
+    if (suits.size === 1) han += honor ? 3 : 6;
+    for (let t = 0; t < 34; t++) han += counts[t] * dora(t, view);
+    han += reds;
+    return { points: Math.max(1000, closedPoints(han, 25, view)), yakuChance: 1, closed: true };
+  }
+  function kokushiValue(view) {
+    return { points: view.isDealer ? 48000 : 32000, yakuChance: 1, closed: true };
+  }
+  function routeShanten(counts, melds, route) {
+    if (route === 'chiitoi') return S.chiitoi(counts);
+    if (route === 'kokushi') return S.kokushi(counts);
+    return S.standard(counts, melds);
+  }
+  function bestRoute(counts, melds) {
+    const std = S.standard(counts, melds);
+    let route = 'standard', sh = std;
+    if (melds === 0) {
+      const chi = S.chiitoi(counts), kok = S.kokushi(counts);
+      if (chi < sh) { route = 'chiitoi'; sh = chi; }
+      if (kok < sh) { route = 'kokushi'; sh = kok; }
+    }
+    return { route, sh };
+  }
+  function routeUkeire(counts, melds, unseen, route) {
+    const base = routeShanten(counts, melds, route);
+    const tiles = []; let total = 0;
+    for (let t = 0; t < 34; t++) {
+      if (counts[t] >= 4 || unseen[t] <= 0) continue;
+      counts[t]++;
+      const s = routeShanten(counts, melds, route);
+      counts[t]--;
+      if (s < base) { tiles.push(t); total += unseen[t]; }
+    }
+    return { tiles, count: total, base };
+  }
+  AI.bestRoute = bestRoute;
 
   function handValue(counts, view, redCount) {
     const all = counts.slice();
@@ -168,19 +270,25 @@
     }
     return { winProbability: mass[stages], tenpaiProbability: tenpai };
   }
-  function evaluator(view) {
+  function evaluator(view, w = AI.weights) {
     const cache = new Map(), shapeCache = new Map();
     return function evaluate(counts, unseen, turns, reds, discarded = [], future) {
       const key = counts.join('') + '/' + unseen.join('') + '/' + turns + '/' + reds + '/' + discarded.join(',') + '/' + future;
       if (cache.has(key)) return cache.get(key);
-      const sh = S.shanten(counts, view.melds.length), uk = S.ukeire(counts, view.melds.length, unseen);
-      const shapeKey = counts.join('') + '/' + unseen.join('');
+      const { route, sh } = bestRoute(counts, view.melds.length);
+      const uk = routeUkeire(counts, view.melds.length, unseen, route);
+      const shapeKey = route + ':' + counts.join('') + '/' + unseen.join('');
       let shape = shapeCache.get(shapeKey);
       if (!shape) {
-        shape = sh === 0 ? { quality: 0, blocks: 5, head: counts.some((n) => n === 2), ryanmen: 0, five: 0, six: null } : blockShape(counts, view, unseen);
+        if (sh === 0) shape = { quality: 0, blocks: 5, head: counts.some((n) => n === 2), ryanmen: 0, five: 0, six: null };
+        else if (route === 'chiitoi') shape = chiitoiShape(counts, unseen);
+        else if (route === 'kokushi') shape = kokushiShape(counts, unseen);
+        else shape = blockShape(counts, view, unseen, w);
         shapeCache.set(shapeKey, shape);
       }
-      const hv = handValue(counts, { ...view, unseen }, reds);
+      const hv = route === 'chiitoi' ? chiitoiValue(counts, view, reds)
+        : route === 'kokushi' ? kokushiValue(view)
+        : handValue(counts, { ...view, unseen }, reds);
       let outs = uk.count, points = hv.points, yakuChance = hv.yakuChance;
       const furiten = sh === 0 && uk.tiles.some((t) => view.ownDiscardTypes.includes(t) || discarded.includes(t));
       if (sh === 0) {
@@ -195,14 +303,14 @@
       }
       const probs = probability(sh, outs, future, sum(unseen), turns);
       // Ron and opponents ending the hand are approximated, clearly identified in the record.
-      const survival = Math.exp(-(view.threat ? 0.075 : 0.027) * Math.max(1, sh + 1) * turns / 2);
+      const survival = Math.exp(-(view.threat ? w.survivalThreat : w.survivalBase) * Math.max(1, sh + 1) * turns / 2);
       const ronFactor = sh === 0 && outs ? uk.tiles.reduce((n, t) => n + unseen[t] * (T.isYaochu(t) ? 0.6 : T.numOf(t) === 2 || T.numOf(t) === 8 ? 0.4 : 0.25), 0) / outs : 0.35;
       const gross = probs.winProbability * points * yakuChance * survival * (furiten ? 1 : 1 + ronFactor);
-      const efficiency = -sh * 125 + uk.count * 1.25 + shape.quality * 2.4;
-      const value = { sh, ukeire: uk.count, waits: uk.tiles, shape: round(shape.quality), blocks: shape.blocks,
-        blockPlans: { five: shape.five, six: shape.six, head: shape.head, ryanmen: shape.ryanmen },
+      const efficiency = -sh * w.shantenCost + uk.count * w.ukeireGain + shape.quality * w.shapeGain;
+      const value = { sh, ukeire: uk.count, waits: uk.tiles, shape: round(shape.quality), blocks: shape.blocks, route,
+        blockPlans: { five: shape.five, six: shape.six, head: shape.head, ryanmen: shape.ryanmen, pairs: shape.pairs },
         ...probs, estimatedWinPoints: round(points), grossEV: gross, yakuChance, furiten,
-        score: efficiency + gross * 0.035 };
+        score: efficiency + gross * w.grossWeight };
       cache.set(key, value); return value;
     };
   }
@@ -212,7 +320,7 @@
     const choices = [];
     let min = 99;
     for (let t = 0; t < 34; t++) if (counts[t] && !forbidden.includes(t)) {
-      counts[t]--; const sh = S.shanten(counts, view.melds.length); counts[t]++;
+      counts[t]--; const sh = bestRoute(counts, view.melds.length).sh; counts[t]++;
       choices.push({ t, sh }); min = Math.min(min, sh);
     }
     let best = null;
@@ -225,10 +333,10 @@
     }
     return best;
   }
-  function lookahead(counts, view, evaluate, turns, reds) {
+  function lookahead(counts, view, evaluate, turns, reds, w = AI.weights) {
     const unseen = view.unseen.slice(), pool = sum(unseen);
     let score = 0, gross = 0, tenpai = 0, win = 0, future = 0, improvedWeight = 0, improvedUkeire = 0;
-    const baseSh = S.shanten(counts, view.melds.length);
+    const baseSh = bestRoute(counts, view.melds.length).sh;
     // Includes non-shanten-improving draws: replacement taatsu, spare central tiles, extra heads.
     for (let t = 0; t < 34; t++) {
       if (!unseen[t] || counts[t] >= 4) continue;
@@ -236,7 +344,7 @@
       counts[t]++; unseen[t]--;
       if (MJ.agari.isAgari(counts, view.melds.length)) {
         const value = winValue(counts, t, view, reds, view.menzen && view.score >= 1000);
-        if (value) { score += weight * (125 + value * 0.035); gross += weight * value; tenpai += weight; win += weight; counts[t]--; unseen[t]++; continue; }
+        if (value) { score += weight * (w.shantenCost + value * w.grossWeight); gross += weight * value; tenpai += weight; win += weight; counts[t]--; unseen[t]++; continue; }
       }
       const best = postDrawChoices(counts, unseen, view, evaluate, Math.max(0, turns - 1), reds);
       counts[t]--; unseen[t]++;
@@ -248,21 +356,22 @@
     return { nextScore: score, expectedGross: gross, futureUkeire: future, improvedUkeire: improvedWeight ? improvedUkeire / improvedWeight : 0,
       winProbability: win, tenpaiProbability: tenpai };
   }
-  AI.analyzeDiscard = function (rawView, level = 'strong') {
-    const view = normalized(rawView), counts = T.countsFromIds(view.hand), evaluate = evaluator(view);
-    const turns = horizon(view), reds = redCount(view), candidates = [];
+  AI.analyzeDiscard = function (rawView, level = 'strong', w = AI.weights) {
+    AI.assertObservation(rawView);
+    const view = normalized(rawView), counts = T.countsFromIds(view.hand), evaluate = evaluator(view, w);
+    const turns = horizon(view), reds = redCount(view), bias = rankBias(view), candidates = [];
     const types = [...new Set((view.legalDiscards || view.hand).filter((id) => !(view.forbidden || []).includes(id >> 2)).map((id) => id >> 2))];
     for (const t of types) {
       const tileId = pickId(view.hand, t, view.drawnTile);
       counts[t]--;
       const ev = evaluate(counts, view.unseen, turns, reds - Number(T.isRed(tileId)), [t]);
       counts[t]++;
-      const risk = AI.risk(t, view);
+      const risk = AI.risk(t, view, w);
       const copies = counts[t];
       // Folding with duplicate safer tiles reserves safe exits for later turns.
       const reserve = risk.probability < 0.09 ? Math.max(0, copies - 1) * (1 - risk.probability * 8) * 65 : 0;
       const futureLoss = view.threat ? risk.loss * Math.min(3, 0.65 + ev.sh * 0.65) : 0;
-      const expectedNet = ev.grossEV - risk.loss - futureLoss;
+      const expectedNet = ev.grossEV - (risk.loss + futureLoss) * bias;
       candidates.push({ ...ev, t, tileId, danger: round(risk.probability * 100), dangerByOpponent: risk.detail,
         expectedLoss: round(risk.loss + futureLoss), expectedNet, reserve,
         doraLoss: dora(t, view) + Number(T.isRed(tileId)), score: view.threat ? expectedNet + reserve + ev.score * 0.08 : ev.score });
@@ -274,7 +383,7 @@
       for (const c of beam) {
         if (c.sh === 0) continue;
         counts[c.t]--;
-        const next = lookahead(counts, view, evaluate, turns, reds - Number(T.isRed(c.tileId)));
+        const next = lookahead(counts, view, evaluate, turns, reds - Number(T.isRed(c.tileId)), w);
         counts[c.t]++;
         c.futureUkeire = round(next.futureUkeire);
         c.improvedUkeire = round(next.improvedUkeire);
@@ -287,7 +396,7 @@
     }
     for (const c of candidates) { c.expectedNet = round(c.expectedNet); c.score = round(c.score); c.grossEV = round(c.grossEV); }
     return { version: AI.version, model: 'public-info / all-tile one-draw search + finite-horizon approximation',
-      level, horizon: turns, unseen: view.unseen.slice(), candidates };
+      level, horizon: turns, rankBias: bias, unseen: view.unseen.slice(), candidates };
   };
   function forbiddenCall(action) {
     const out = [action.tile];
@@ -298,8 +407,9 @@
     }
     return out;
   }
-  AI.analyzeCall = function (rawView, options) {
-    const view = normalized(rawView), turns = horizon(view), ev = evaluator(view);
+  AI.analyzeCall = function (rawView, options, w = AI.weights) {
+    AI.assertObservation(rawView);
+    const view = normalized(rawView), turns = horizon(view), ev = evaluator(view, w), bias = rankBias(view);
     const counts = T.countsFromIds(view.hand), pass = ev(counts, view.unseen, turns, redCount(view));
     const alternatives = [{ action: null, label: '見送り', sh: pass.sh, ukeire: pass.ukeire, expectedNet: round(pass.grossEV), winProbability: pass.winProbability }];
     const actions = [];
@@ -317,13 +427,13 @@
       let result;
       if (action.type === 'kan') {
         // Average the replacement draw. Unknown new dora is not peeked at or credited.
-        const next = lookahead(T.countsFromIds(hand), v, evaluator(v), turns, redCount(v));
-        result = { sh: S.shanten(T.countsFromIds(hand), v.melds.length), ukeire: next.futureUkeire,
+        const next = lookahead(T.countsFromIds(hand), v, evaluator(v, w), turns, redCount(v), w);
+        result = { sh: bestRoute(T.countsFromIds(hand), v.melds.length).sh, ukeire: next.futureUkeire,
           expectedNet: next.expectedGross - (view.threat ? 500 : 120), winProbability: next.winProbability };
-      } else result = AI.analyzeDiscard(v, 'standard').candidates[0];
+      } else result = AI.analyzeDiscard(v, 'standard', w).candidates[0];
       if (!result) continue;
       // Fewer concealed tiles also reduce future defensive exits.
-      const defenseCost = view.threat ? 180 + 80 * v.melds.length : 0;
+      const defenseCost = view.threat ? (w.callDefense + 80 * v.melds.length) * bias : 0;
       alternatives.push({ action, label: action.type === 'chi' ? 'チー ' + action.tiles.map(T.label).join('・') : action.type === 'pon' ? 'ポン' : '大明槓',
         discard: result.tileId, sh: result.sh, ukeire: round(result.ukeire), expectedNet: round(result.expectedNet - defenseCost), winProbability: result.winProbability });
     }
@@ -333,33 +443,38 @@
     const delta = best ? best.expectedNet - baseline : 0;
     // Normalized EV difference stays defined with zero/negative EV; it is NOT a win probability.
     const advantagePercent = best ? 100 * delta / Math.max(100, Math.abs(best.expectedNet), Math.abs(baseline)) : 0;
-    const selected = best && delta > Math.max(20, Math.abs(baseline) * 0.025) ? best.action : null;
-    return { version: AI.version, kind: 'call', model: 'approximate net EV', unseen: view.unseen.slice(), horizon: turns,
+    const selected = best && delta > Math.max(w.callDeltaMin, Math.abs(baseline) * w.callDeltaRatio) ? best.action : null;
+    return { version: AI.version, kind: 'call', model: 'approximate net EV', unseen: view.unseen.slice(), horizon: turns, rankBias: bias,
       alternatives, selected, bestCall: best?.action || null, delta: round(delta), advantagePercent: round(advantagePercent),
       percentDefinition: '(bestCallEV - passEV) / max(100, abs(bestCallEV), abs(passEV)) * 100' };
   };
   AI.create = function (seat, opts = {}) {
+    const weights = opts.weights ? { ...AI.weights, ...opts.weights } : AI.weights;
     return {
-      seat, lastCallAnalysis: null,
+      seat, weights, lastCallAnalysis: null,
       async wantTsumo() { return true; },
       async chooseDiscard(view) {
+        AI.assertObservation(view);
         if (view.riichi) return { tileId: view.drawnTile, riichi: false, analysis: { version: AI.version, forced: true } };
-        const analysis = AI.analyzeDiscard(view, opts.level || 'strong'), best = analysis.candidates[0];
-        const riichi = view.menzen && best.sh === 0 && !best.furiten && view.score >= 1000 && view.liveRemaining >= 4 && (!view.threat || best.expectedNet > 100);
+        const analysis = AI.analyzeDiscard(view, opts.level || 'strong', weights), best = analysis.candidates[0];
+        const margin = weights.pushMargin * rankBias(view);
+        const riichi = view.menzen && best.sh === 0 && !best.furiten && view.score >= 1000 && view.liveRemaining >= 4 && (!view.threat || best.expectedNet > margin);
         return { tileId: best.tileId, riichi, analysis };
       },
       async wantCall(view, options) {
+        AI.assertObservation(view);
         this.lastCallAnalysis = null;
         if (options.ron) return { type: 'ron' };
         if (view.riichi) return null;
-        this.lastCallAnalysis = AI.analyzeCall(view, options);
+        this.lastCallAnalysis = AI.analyzeCall(view, options, weights);
         return this.lastCallAnalysis.selected;
       },
       async wantKan(view, kans) {
+        AI.assertObservation(view);
         if (view.threat || view.liveRemaining < 8) return null;
-        const c = T.countsFromIds(view.hand), base = S.shanten(c, view.melds.length);
+        const c = T.countsFromIds(view.hand), base = bestRoute(c, view.melds.length).sh;
         return kans.find((k) => { const after = c.slice(); after[k.tile] -= k.kind === 'ankan' ? 4 : 1;
-          return S.shanten(after, view.melds.length + Number(k.kind === 'ankan')) <= base; }) || null;
+          return bestRoute(after, view.melds.length + Number(k.kind === 'ankan')).sh <= base; }) || null;
       }
     };
   };

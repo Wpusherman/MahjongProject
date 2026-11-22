@@ -6,8 +6,20 @@
     return 8 - 2 * (sets + openSets) - Math.min(taatsu, 4 - sets - openSets) - pair;
   }
 
+  const standardCache = new Map();
   S.standard = function (counts, openSets) {
     openSets = openSets || 0;
+    const key = openSets + ':' + counts.join('');
+    let value = standardCache.get(key);
+    if (value === undefined) {
+      value = standardRaw(counts, openSets);
+      if (standardCache.size > 200000) standardCache.clear();
+      standardCache.set(key, value);
+    }
+    return value;
+  };
+
+  function standardRaw(counts, openSets) {
     const c = counts.slice();
     let min = 99;
 
@@ -57,7 +69,7 @@
 
     dfs(0, 0, 0, 0);
     return min;
-  };
+  }
 
   S.chiitoi = function (counts) {
     let pairs = 0;

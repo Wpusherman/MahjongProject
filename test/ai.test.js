@@ -1,5 +1,5 @@
 const assert = require('node:assert/strict');
-for (const file of ['tiles', 'shanten', 'agari', 'yaku', 'score', 'ai', 'game', 'record']) require('../src/' + file + '.js');
+for (const file of ['tiles', 'shanten', 'agari', 'yaku', 'score', 'rank', 'ai', 'game', 'record']) require('../src/' + file + '.js');
 const MJ = globalThis.MJ, T = MJ.tiles;
 function hand(text) {
   const copies = Array(34).fill(0), result = [];
@@ -53,5 +53,25 @@ function view(text, extra = {}) {
   assert.equal(tenpai.winProbability, 0);
   const forced = await ai.chooseDiscard({ ...add, riichi: true, drawnTile: 135 });
   assert.equal(forced.tileId, 135);
-  console.log('AI strategy regressions OK: honors, growth, suji, tanki risk, call comparison, dead waits, immutability');
+  // Route-aware evaluation: the plan, shanten, acceptance and shape share one route.
+  const chiitoiView = view('1589m38p36s113356z');
+  const chiitoiAnalysis = MJ.ai.analyzeDiscard(chiitoiView, 'strong');
+  assert.equal(chiitoiAnalysis.candidates[0].route, 'chiitoi', 'two honor pairs with many isolated tiles adopt the seven-pairs route');
+  assert.equal(chiitoiAnalysis.candidates[0].sh, 4, 'the adopted route sets the reported shanten');
+  assert.equal(chiitoiAnalysis.candidates[0].blockPlans.pairs, 2, 'the seven-pairs shape reports its pairs');
+  const stdAnalysis = MJ.ai.analyzeDiscard(view('23678m5p24579s467z'), 'strong');
+  assert.equal(stdAnalysis.candidates[0].route, 'standard', 'a standard hand keeps the standard route');
+  // Per-agent weights are tunable without mutating the global defaults.
+  // Standings turn raw points into rank-point pressure: leaders defend, trailers push.
+  const rankView = view('23678m5p24579s467z', { seat: 3, seatWind: 27, scores: [60000, 25000, 20000, 5000], handsLeft: 1 });
+  const trailer = MJ.ai.analyzeDiscard(rankView, 'standard');
+  const leader = MJ.ai.analyzeDiscard({ ...rankView, scores: [5000, 25000, 20000, 60000] }, 'standard');
+  assert(trailer.rankBias < 1, 'a trailer accepts more risk');
+  assert(leader.rankBias > 1, 'a leader protects the lead');
+  const defaults = JSON.stringify(MJ.ai.weights);
+  const base = await ai.chooseDiscard(view('1589m38p36s113356z'));
+  const heavy = await MJ.ai.create(1, { weights: { ...MJ.ai.weights, shapeGain: 10 } }).chooseDiscard(view('1589m38p36s113356z'));
+  assert(Math.abs(heavy.analysis.candidates[0].shape) >= Math.abs(base.analysis.candidates[0].shape), 'shapeGain is read from per-agent weights');
+  assert.equal(JSON.stringify(MJ.ai.weights), defaults, 'per-agent weights leave the global defaults untouched');
+  console.log('AI strategy regressions OK: honors, growth, suji, tanki risk, call comparison, dead waits, immutability, route, weights');
 })().catch((e) => { console.error(e); process.exit(1); });

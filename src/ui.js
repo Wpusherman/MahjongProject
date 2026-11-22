@@ -4,8 +4,15 @@
   const NAMES = ['あなた', 'COM 1', 'COM 2', 'COM 3'];
   const WINDS = ['東', '南', '西', '北'];
   const escape = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  const ui = MJ.ui = { game: null, humanSeat: 0, mode: null, running: false, fast: false, token: 0,
-    record: null, review: null, pending: null, discardResolve: null, riichiWanted: false, level: 'strong' };
+  const ui = MJ.ui = { humanSeat: 0, mode: null, running: false, fast: false, token: 0,
+    record: null, review: null, pending: null, discardResolve: null, riichiWanted: false, level: 'strong', aiWeights: null, rankConfig: 'tenhou' };
+  // The raw game object stays in this closure. It is exposed only to automated tests,
+  // never as a normal console-accessible property in the built page.
+  let currentGame = null;
+  Object.defineProperty(ui, 'game', {
+    get() { return globalThis.__SUITAKU_DEBUG__ === true ? currentGame : null; },
+    set(value) { currentGame = value; }, configurable: true
+  });
   const button = (label, action, cls) => { const b = document.createElement('button'); b.textContent = label; b.onclick = action; if (cls) b.className = cls; return b; };
   function toast(message) {
     $('toast').textContent = message; $('toast').classList.add('visible');
@@ -13,20 +20,32 @@
   }
   function tileEl(type, opts = {}) {
     const d = document.createElement(opts.clickable ? 'button' : 'div');
-    d.className = 'tile ' + T.suitOf(type) + (type >= 27 ? ' h' + type : '') +
-      ['small', 'mini', 'back', 'clickable', 'dim', 'red', 'drawn'].filter((c) => opts[c]).map((c) => ' ' + c).join('') + (opts.highlight ? ' tsumo-highlight' : '');
-    d.title = opts.back ? '裏向きの牌' : (opts.red ? '赤' : '') + T.label(type);
-    d.setAttribute('aria-label', d.title);
-    if (!opts.back) {
-      const glyph = document.createElement('span'); glyph.className = 'glyph';
-      glyph.textContent = type < 9 ? 'qwertyuio'[type] : type < 18 ? 'zxcvbnm,.'[type - 9] : type < 27 ? 'asdfghjkl'[type - 18] : '1234567'[type - 27];
-      glyph.setAttribute('aria-hidden', 'true'); d.appendChild(glyph);
+    if (opts.back) {
+      // A face-down tile must not carry its suit, honor index, red flag or name in the DOM.
+      d.className = 'tile back' + ['small', 'mini'].filter((c) => opts[c]).map((c) => ' ' + c).join('');
+      d.title = '伏せ牌';
+      d.setAttribute('aria-label', d.title);
+      if (opts.clickable) d.onclick = opts.onClick;
+      if (opts.sideways) { const slot = document.createElement('span'); slot.className = 'sideways-slot'; slot.appendChild(d); return slot; }
+      return d;
     }
+    d.className = 'tile ' + T.suitOf(type) + (type >= 27 ? ' h' + type : '') +
+      ['small', 'mini', 'clickable', 'dim', 'red', 'drawn'].filter((c) => opts[c]).map((c) => ' ' + c).join('') + (opts.highlight ? ' tsumo-highlight' : '');
+    d.title = (opts.red ? '赤' : '') + T.label(type);
+    d.setAttribute('aria-label', d.title);
+    const glyph = document.createElement('span'); glyph.className = 'glyph';
+    glyph.textContent = type < 9 ? 'qwertyuio'[type] : type < 18 ? 'zxcvbnm,.'[type - 9] : type < 27 ? 'asdfghjkl'[type - 18] : '1234567'[type - 27];
+    glyph.setAttribute('aria-hidden', 'true'); d.appendChild(glyph);
     if (opts.clickable) d.onclick = opts.onClick;
     if (opts.sideways) { const slot = document.createElement('span'); slot.className = 'sideways-slot'; slot.appendChild(d); return slot; }
     return d;
   }
-  function appendTile(parent, id, opts) { return parent.appendChild(tileEl(id >> 2, { red: T.isRed(id), ...opts })); }
+  function appendTile(parent, id, opts = {}) {
+    const merged = { ...opts };
+    if (merged.back) { delete merged.red; delete merged.highlight; }
+    else merged.red = T.isRed(id);
+    return parent.appendChild(tileEl(id >> 2, merged));
+  }
   function appendLog(msg, data) {
     const div = document.createElement('div');
     div.textContent = msg.replace(/P([1-4])/g, (_, s) => NAMES[Number(s) - 1]);
@@ -36,28 +55,41 @@
     }
     $('log').appendChild(div); $('log').scrollTop = $('log').scrollHeight;
   }
-  function renderSeat(seat, game) {
-    const el = $('seat-' + seat), p = game.players[seat]; el.innerHTML = '';
-    const human = seat === 0;
-    el.classList.toggle('active', game.currentSeat === seat && !game.ended);
+  function seatObservation(obs, seat) {
+    if (seat === obs.seat) return { own: true, hand: obs.hand, handCount: obs.hand.length, melds: obs.melds,
+      drawnTile: obs.drawnTile, riichi: obs.riichi, score: obs.score, isDealer: obs.isDealer,
+      forbidden: obs.forbidden, discardHistory: obs.ownDiscardHistory };
+    const o = (obs.opponents || []).find((x) => x.seat === seat) || {};
+    return { own: false, hand: o.hand, handCount: o.handCount, melds: o.melds || [], drawnTile: null,
+      riichi: o.riichi, score: o.score, isDealer: o.isDealer, forbidden: [], discardHistory: o.discardHistory || [] };
+  }
+  function renderSeat(seat, obs, game) {
+    const el = $('seat-' + seat), p = seatObservation(obs, seat); el.innerHTML = '';
+    const human = seat === ui.humanSeat;
+    el.classList.toggle('active', obs.currentSeat === seat && !obs.ended);
     const head = document.createElement('div'); head.className = 'seat-head';
-    head.innerHTML = `<span class="wind">${WINDS[game.seatWindOf(seat) - 27]}</span><span>${NAMES[seat]}</span><span class="score">${p.score.toLocaleString()}</span>` +
+    head.innerHTML = `<span class="wind">${WINDS[obs.seatWinds[seat] - 27]}</span><span>${NAMES[seat]}</span><span class="score">${p.score.toLocaleString()}</span>` +
       (p.riichi ? '<span class="riichi-flag">● リーチ</span>' : '');
     const row = document.createElement('div'); row.className = 'hand-row';
-    const reveal = human || (ui.review && ui.review.reveal) || (game.ended && game.result && (game.result.winner === seat || (game.result.tenpai || []).includes(seat)));
-    const ids = MJ.sortHand(p.hand.filter((id) => id !== p.drawnTile));
-    // The draw is always at the player's own left edge, including rotated opponents.
-    if (p.drawnTile != null) ids.unshift(p.drawnTile);
-    for (const id of ids) {
-      const drawn = id === p.drawnTile;
-      const legal = !p.forbidden.includes(id >> 2) && (!p.riichi || drawn) && (!ui.riichiWanted || game.waits(seat, p.hand.filter((x) => x !== id)).length > 0);
-      appendTile(row, id, { back: !reveal, drawn, clickable: human && ui.mode === 'discard' && legal && !ui.review,
-        highlight: human && drawn && ui.mode === 'discard', dim: human && ui.mode === 'discard' && !legal,
-        onClick: () => onTileClick(id) });
+    const reveal = p.own || !!obs.revealAll || (obs.ended && obs.result && (obs.result.winner === seat || (obs.result.tenpai || []).includes(seat)));
+    if (reveal && Array.isArray(p.hand)) {
+      const ids = MJ.sortHand(p.hand.filter((id) => id !== p.drawnTile));
+      // The draw is always at the player's own left edge, including rotated opponents.
+      if (p.drawnTile != null) ids.unshift(p.drawnTile);
+      for (const id of ids) {
+        const drawn = id === p.drawnTile;
+        const legal = p.own && !p.forbidden.includes(id >> 2) && (!p.riichi || drawn) &&
+          (!ui.riichiWanted || game.waits(seat, p.hand.filter((x) => x !== id)).length > 0);
+        appendTile(row, id, { back: false, drawn, clickable: human && ui.mode === 'discard' && legal && !ui.review,
+          highlight: human && p.own && drawn && ui.mode === 'discard', dim: human && p.own && ui.mode === 'discard' && !legal,
+          onClick: () => onTileClick(id) });
+      }
+    } else {
+      for (let i = 0; i < (p.handCount || 0); i++) appendTile(row, 0, { back: true });
     }
     el.appendChild(head); el.appendChild(row);
     const mr = document.createElement('div'); mr.className = 'melds-row';
-    for (const m of p.melds) {
+    for (const m of p.melds || []) {
       const md = document.createElement('div'); md.className = 'meld';
       const tiles = m.tiles.filter((id) => id !== m.addedTile);
       if (m.open && m.calledTile != null) {
@@ -78,12 +110,12 @@
     }
     el.appendChild(mr);
   }
-  function renderRiver(seat, game) {
+  function renderRiver(seat, obs) {
     const root = $('river-' + seat); root.innerHTML = '';
-    const p = game.players[seat]; let row;
+    const p = seatObservation(obs, seat); let row;
     let pendingRiichi = false;
     const visible = [];
-    for (const d of p.discardHistory) {
+    for (const d of p.discardHistory || []) {
       if (d.riichi) pendingRiichi = true;
       if (d.called) continue;
       visible.push({ ...d, sideways: pendingRiichi }); pendingRiichi = false;
@@ -93,26 +125,26 @@
       const el = appendTile(row, d.tileId, { mini: true, sideways: d.sideways });
       const tile = d.sideways ? el.firstChild : el;
       if (d.tsumogiri) tile.classList.add('tsumogiri');
-      if (game.lastDiscard && game.lastDiscard.tileId === d.tileId) tile.classList.add('latest');
+      if (obs.lastDiscard && obs.lastDiscard.tileId === d.tileId) tile.classList.add('latest');
       tile.title += ` · ${d.tsumogiri ? 'ツモ切り' : '手出し'}${d.riichi ? ' · リーチ宣言' : ''} · #${d.eventIndex}`;
     });
   }
-  function guide(game) {
+  function guide(obs, game) {
     const root = $('hand-guide'); root.innerHTML = '';
     if (!$('show-guide').checked) { root.textContent = '手牌ガイドはオフです'; return; }
-    const p = game.players[0], counts = T.countsFromIds(p.hand);
-    const sh = MJ.shanten.shanten(counts, p.melds.length);
+    const counts = T.countsFromIds(obs.hand);
+    const sh = MJ.shanten.shanten(counts, obs.melds.length);
     root.textContent = sh < 0 ? '和了形' : sh === 0 ? 'テンパイ' : `${sh} 向聴`;
-    if (p.hand.length % 3 === 1 && sh === 0) {
-      const waits = game.waits(0), unseen = game.computeUnseen(0), row = document.createElement('div'); row.className = 'guide-tiles';
+    if (obs.hand.length % 3 === 1 && sh === 0) {
+      const waits = obs.waits || game.waits(obs.seat), unseen = obs.unseen, row = document.createElement('div'); row.className = 'guide-tiles';
       for (const t of waits) row.appendChild(tileEl(t, { mini: true }));
       root.appendChild(row);
       const note = document.createElement('div'); note.className = 'muted';
-      note.textContent = `未見 ${waits.reduce((n, t) => n + unseen[t], 0)}枚${game.isFuriten(0) ? ' / フリテン' : ''}`; root.appendChild(note);
+      note.textContent = `未見 ${waits.reduce((n, t) => n + unseen[t], 0)}枚${obs.furiten ?? game.isFuriten(obs.seat) ? ' / フリテン' : ''}`; root.appendChild(note);
     }
   }
-  function animateDiscard(game) {
-    const d = game.lastDiscard;
+  function animateDiscard(obs) {
+    const d = obs.lastDiscard;
     if (!d || ui.review) return;
     // Re-renders must not restart the same discard animation.
     const key = d.eventIndex + ':' + d.tileId;
@@ -130,26 +162,27 @@
       a.onfinish = () => { flight.innerHTML = ''; };
     }
   }
-  function render(game = ui.game) {
+  function render(game = currentGame) {
     if (!game || !game.players) return;
+    const obs = game.getObservation(ui.humanSeat, { ui: true, revealAll: !!(ui.review && ui.review.reveal) });
     $('table').classList.toggle('review-mode', !!ui.review);
-    $('wall-info').innerHTML = `${game.liveRemaining()}<small>枚</small>`;
-    $('wall-meter-fill').style.width = game.liveRemaining() / 70 * 100 + '%';
-    $('round-info').textContent = `${WINDS[game.roundWind - 27]}${game.dealer + 1}局 ${game.honba}本場`;
+    $('wall-info').innerHTML = `${obs.liveRemaining}<small>枚</small>`;
+    $('wall-meter-fill').style.width = obs.liveRemaining / 70 * 100 + '%';
+    $('round-info').textContent = `${WINDS[obs.roundWind - 27]}${obs.dealer + 1}局 ${obs.honba}本場`;
     const di = $('dora-info'); di.innerHTML = '';
     for (let i = 0; i < 5; i++) {
-      const id = game.doraIndicators[i];
+      const id = obs.doraIndicators[i];
       di.appendChild(tileEl(id == null ? 0 : id >> 2, { small: true, back: id == null, red: id != null && T.isRed(id) }));
     }
-    $('center').innerHTML = `<span class="center-tag">${ui.review ? 'REPLAY' : ui.record && ui.record.mode === 'hanchan' ? 'HANCHAN' : 'TONPU'}</span><div class="center-round">${WINDS[game.roundWind - 27]} ${game.dealer + 1} 局</div><div class="center-remaining">${game.liveRemaining()}<small>枚</small></div><div class="info-line"><span>${game.honba} 本場</span><span>供託 ${game.riichiSticks}</span></div>`;
-    for (let s = 0; s < 4; s++) { renderSeat(s, game); renderRiver(s, game); }
-    guide(game); animateDiscard(game);
+    $('center').innerHTML = `<span class="center-tag">${ui.review ? 'REPLAY' : ui.record && ui.record.mode === 'hanchan' ? 'HANCHAN' : 'TONPU'}</span><div class="center-round">${WINDS[obs.roundWind - 27]} ${obs.dealer + 1} 局</div><div class="center-remaining">${obs.liveRemaining}<small>枚</small></div><div class="info-line"><span>${obs.honba} 本場</span><span>供託 ${obs.riichiSticks}</span></div>`;
+    for (let s = 0; s < 4; s++) { renderSeat(s, obs, game); renderRiver(s, obs); }
+    guide(obs, game); animateDiscard(obs);
   }
   function onTileClick(id) {
     if (!ui.discardResolve || ui.mode !== 'discard') return;
-    const p = ui.game.players[0];
+    const p = ui.view;
     if (p.forbidden.includes(id >> 2) || (p.riichi && id !== p.drawnTile)) return;
-    if (ui.riichiWanted && !ui.game.waits(0, p.hand.filter((x) => x !== id)).length) return;
+    if (ui.riichiWanted && !currentGame.waits(ui.humanSeat, p.hand.filter((x) => x !== id)).length) return;
     const resolve = ui.discardResolve, riichi = ui.riichiWanted;
     ui.discardResolve = null; ui.pending = null; ui.mode = null;
     $('controls').innerHTML = '<span class="hint">COM の思考中…</span>';
@@ -166,10 +199,11 @@
       const token = ui.token, view = ui.view;
       toast('候補を計算しています…');
       await new Promise((r) => setTimeout(r, 20));
-      const d = await MJ.ai.create(0, { level: ui.level }).chooseDiscard(view);
+      const d = await MJ.ai.create(0, { level: ui.level, weights: ui.aiWeights || undefined }).chooseDiscard(view);
       if (token !== ui.token || ui.mode !== 'discard') return;
       const best = d.analysis && d.analysis.candidates && d.analysis.candidates[0];
-      toast(`推奨：${T.label(d.tileId >> 2)}${best ? ` / ${best.sh}向聴・受入${best.ukeire}枚` : '（リーチ中）'}${d.riichi ? ' / リーチ' : ''}`);
+      const routeLabel = best && best.route === 'chiitoi' ? '（七対子）' : best && best.route === 'kokushi' ? '（国士）' : '';
+      toast(`推奨：${T.label(d.tileId >> 2)}${best ? ` / ${best.sh}向聴${routeLabel}・受入${best.ukeire}枚` : '（リーチ中）'}${d.riichi ? ' / リーチ' : ''}`);
     }));
   }
   function askChoice(question, choices, token) {
@@ -219,7 +253,7 @@
     };
   }
   function pacedAI(seat, token) {
-    const ai = MJ.ai.create(seat, { level: ui.level }), out = {};
+    const ai = MJ.ai.create(seat, { level: ui.level, weights: ui.aiWeights || undefined }), out = {};
     for (const fn of ['wantTsumo', 'chooseDiscard', 'wantCall', 'wantKan']) out[fn] = async (...args) => {
       await new Promise((r) => setTimeout(r, ui.fast ? 0 : fn === 'chooseDiscard' ? 400 : 100));
       if (token !== ui.token) return fn === 'chooseDiscard' ? { tileId: args[0].hand[0] } : null;
@@ -242,7 +276,7 @@
   }
   function stop() {
     ui.token++; ui.running = false; ui.mode = null; ui.review = null; ui.waitingResult = false;
-    if (ui.game) ui.game.cancelled = true;
+    if (currentGame) currentGame.cancelled = true;
     if (ui.pending) ui.pending(); if (ui.resultResolve) ui.resultResolve();
     ui.pending = null; ui.discardResolve = null; ui.resultResolve = null;
     $('review-controls').classList.add('hidden');
@@ -259,13 +293,17 @@
     grid.appendChild(east); grid.appendChild(south); p.appendChild(grid);
     const label = document.createElement('label'); label.className = 'field'; label.textContent = '対戦AI'; p.appendChild(label);
     const select = document.createElement('select'); select.innerHTML = '<option value="strong">思考型 — 先読み・牌効率・押し引き</option><option value="standard">標準 — 向聴数・受入枚数重視</option>'; select.value = ui.level; p.appendChild(select);
+    const weightsRow = document.createElement('p'); weightsRow.className = 'muted';
+    weightsRow.appendChild(button(ui.aiWeights ? 'AIの重みを差し替え' : '学習済みのAI重みを読み込む（任意）', () => $('weights-file').click(), 'text-button'));
+    if (ui.aiWeights) weightsRow.appendChild(document.createTextNode(' 学習済みの重みを使用中'));
+    p.appendChild(weightsRow);
     const note = document.createElement('p'); note.textContent = '25,000点持ち / 赤5各1枚 / 頭ハネ / 親テンパイ連荘。ツモ牌は各プレイヤーから見て左端に置きます。'; p.appendChild(note);
-    actions(p, [{ label: '牌譜を読み込む', action: () => $('replay-file').click() }, { label: '対局をはじめる →', primary: true, action: () => { MJ.audio.unlock(); ui.level = select.value; closePanel(); startMatch(mode); } }]);
+    actions(p, [{ label: '牌譜を読み込む（JSON / mjai / 天鳳）', action: () => $('replay-file').click() }, { label: '対局をはじめる →', primary: true, action: () => { MJ.audio.unlock(); ui.level = select.value; closePanel(); startMatch(mode); } }]);
   }
   function rules() {
     const wasHidden = $('overlay').classList.contains('hidden');
     const p = panel('<div class="eyebrow">HOW TO PLAY</div><h2>ルールと操作</h2><ul class="rule-list"><li>手牌をクリックして打牌。リーチはボタンを押してから宣言牌を選択。</li><li>ツモ牌は自分から見て左端。河の小さな点はツモ切り、金枠は直前の捨て牌。</li><li>四人打ち・東風 / 半荘。赤各1枚、喰いタン・後付けあり。喰い替えは禁止。</li><li>複数ロンは頭ハネ。親の和了・テンパイで連荘。流局ごとに本場が増えます。</li><li>飛び終了あり。オーラスの和了やめ・西入 / 南入なし。残った供託はトップへ。</li><li>四風連打・四人リーチ・複数人の四槓は流局。九種九牌・流し満貫は採用していません。</li><li>ダブル役満は大四喜・四暗刻単騎ロン。数え役満あり、役満は複合加算。</li><li>JSON牌譜は全牌山、手牌、ツモ切り、AI評価、検討メモを含みます。読み込むと一手ずつ再生できます。</li></ul><p>牌字：GL-MahjongTile © Gutenberg Labo<br>AIは公開情報を用いた探索・評価型です。</p>');
-    actions(p, [{ label: '閉じる', primary: true, action: () => { closePanel(); if (ui.waitingResult) showResultPanel(ui.game, ui.game.result); else if (!wasHidden && !ui.running) lobby(); } }]);
+    actions(p, [{ label: '閉じる', primary: true, action: () => { closePanel(); if (ui.waitingResult) showResultPanel(currentGame, currentGame.result); else if (!wasHidden && !ui.running) lobby(); } }]);
   }
   function download(name, text, type) {
     const url = URL.createObjectURL(new Blob([text], { type })), a = document.createElement('a');
@@ -277,11 +315,11 @@
     const name = 'suitaku-' + ui.record.createdAt.replace(/[:.]/g, '-');
     const save = (json) => { download(name + (json ? '.json' : '.txt'), json ? JSON.stringify(ui.record, null, 2) : MJ.record.text(ui.record), json ? 'application/json' : 'text/plain'); };
     actions(p, [{ label: 'JSON（再生・検討用）', primary: true, action: () => save(true) }, { label: 'テキスト', action: () => save(false) }]);
-    actions(p, [{ label: '閉じる', action: () => { closePanel(); if (ui.waitingResult) showResultPanel(ui.game, ui.game.result); else if (!ui.running && !ui.review) lobby(); } }]);
+    actions(p, [{ label: '閉じる', action: () => { closePanel(); if (ui.waitingResult) showResultPanel(currentGame, currentGame.result); else if (!ui.running && !ui.review) lobby(); } }]);
   }
   function annotate() {
-    if (!ui.record || !ui.game || !ui.game.lastDiscard) { toast('打牌後にメモを残せます'); return; }
-    const d = ui.game.lastDiscard, hand = ui.review ? ui.review.hand : ui.record.hands.length - 1;
+    if (!ui.record || !currentGame || !currentGame.lastDiscard) { toast('打牌後にメモを残せます'); return; }
+    const d = currentGame.lastDiscard, hand = ui.review ? ui.review.hand : ui.record.hands.length - 1;
     const p = panel(`<div class="eyebrow">REVIEW NOTE</div><h2>打牌に検討メモ</h2><p>局 #${hand + 1} / イベント #${d.eventIndex} / ${NAMES[d.seat]} ${T.label(d.tileId >> 2)}</p>`);
     const input = document.createElement('textarea'); input.rows = 5; input.placeholder = '例：ここはドラを残して、現物の東を切るほうがよいのでは？'; p.appendChild(input);
     actions(p, [{ label: '戻る', action: closePanel }, { label: '牌譜に記録', primary: true, action: () => {
@@ -324,9 +362,9 @@
       while (!state.ended && token === ui.token) {
         const game = new MJ.Game({ agents: [humanAgent(token), pacedAI(1, token), pacedAI(2, token), pacedAI(3, token)],
           onUpdate: () => { if (token === ui.token) render(game); }, onEvent: (msg, data) => { if (token === ui.token) { appendLog(msg, data); if (data?.type) MJ.audio.play(data.type); } } });
-        ui.game = game; ui.animationKey = null; ui.waitingResult = false;
+        currentGame = game; ui.animationKey = null; ui.waitingResult = false;
         appendLog(`── ${state.hand < 4 ? '東' : '南'}${state.dealer + 1}局 ${state.honba}本場 ──`);
-        const playing = game.playHand({ roundWind: 27 + Math.floor(state.hand / 4), dealer: state.dealer, honba: state.honba, riichiSticks: sticks, scores: scores.slice() });
+        const playing = game.playHand({ roundWind: 27 + Math.floor(state.hand / 4), dealer: state.dealer, honba: state.honba, riichiSticks: sticks, scores: scores.slice(), hand: state.hand, mode: state.mode });
         ui.record.hands.push(game.recording);
         const res = await playing;
         if (token !== ui.token || !res) return;
@@ -339,8 +377,13 @@
       if (token !== ui.token) return;
       const ranked = scores.map((score, seat) => ({ score, seat })).sort((a, b) => b.score - a.score || a.seat - b.seat);
       if (sticks) { scores[ranked[0].seat] += sticks * 1000; ranked[0].score += sticks * 1000; }
-      ui.record.finalScores = scores; ui.record.finished = true; autosave(); ui.running = false;
-      const p = panel('<div class="eyebrow">MATCH COMPLETE</div><h2>終局</h2>' + ranked.map((r, i) => `<div class="ranking-row"><span>${i + 1}位　${NAMES[r.seat]}</span><strong>${r.score.toLocaleString()} 点</strong></div>`).join(''));
+      const settled = MJ.rank.finalResult(scores, ui.rankConfig);
+      ui.record.finalScores = scores; ui.record.finalRankPoints = settled.points;
+      ui.record.rankConfig = { name: settled.config.name, uma: settled.config.uma, startScore: settled.config.startScore,
+        returnScore: settled.config.returnScore, scoreUnit: settled.config.scoreUnit, scoreWeight: settled.config.scoreWeight };
+      ui.record.finished = true; autosave(); ui.running = false;
+      const rows = settled.order.map((seat, i) => `<div class="ranking-row"><span>${i + 1}位　${NAMES[seat]}</span><strong>${scores[seat].toLocaleString()} 点 <small>${settled.points[seat] >= 0 ? '+' : ''}${settled.points[seat]} pt</small></strong></div>`).join('');
+      const p = panel('<div class="eyebrow">MATCH COMPLETE</div><h2>終局</h2>' + rows + `<p class="muted">順位点：${settled.config.name} / ウマ ${settled.config.uma.join('・')}</p>`);
       actions(p, [{ label: '牌譜を保存', action: exportRecord }, { label: '牌譜を検討', action: () => startReview(ui.record) }, { label: '新しい対局', primary: true, action: lobby }]);
     } catch (err) {
       if (token !== ui.token) return;
@@ -395,7 +438,10 @@
       const scroll = document.createElement('div'); scroll.className = 'analysis-scroll'; scroll.appendChild(table); root.appendChild(scroll);
       if (modern) {
         const best = candidates[0], note = document.createElement('p'); note.className = 'muted';
-        note.textContent = `${best.blocks}ブロック候補 / 雀頭${best.blockPlans.head ? 'あり' : 'なし'} / 次ツモ後平均受入 ${best.futureUkeire ?? '—'}枚。¹放銃率・期待収支は公開情報からのモデル推定（実測値ではありません）。`; root.appendChild(note);
+        const plan = best.route === 'chiitoi' ? `${best.blocks}対子（七対子ルート）`
+          : best.route === 'kokushi' ? '国士無双ルート'
+          : `${best.blocks}ブロック候補 / 雀頭${best.blockPlans.head ? 'あり' : 'なし'}`;
+        note.textContent = `${plan} / 次ツモ後平均受入 ${best.futureUkeire ?? '—'}枚。¹放銃率・期待収支は公開情報からのモデル推定（実測値ではありません）。`; root.appendChild(note);
       }
     }
     if (analysis.unseen) {
@@ -427,7 +473,7 @@
   function renderReview() {
     const r = ui.review, h = ui.record.hands[r.hand];
     r.position = Math.max(0, Math.min(r.position, h.events.length - 1));
-    ui.game = MJ.record.snapshot(h, r.position); render();
+    currentGame = MJ.record.snapshot(h, r.position); render();
     renderTimeline(h);
     const root = $('review-controls'); root.classList.remove('hidden'); root.innerHTML = '<div class="section-label">REPLAY <span>牌譜検討</span></div>';
     const select = document.createElement('select');
@@ -485,12 +531,42 @@
       actions(p, [{ label: '対局に戻る', action: closePanel }, { label: '牌譜を保存', action: exportRecord }, { label: '新規対局', primary: true, action: () => { autosave(); stop(); lobby(); } }]);
     };
     $('btn-rules').onclick = rules; $('btn-export').onclick = exportRecord; $('btn-note').onclick = annotate;
-    $('show-guide').onchange = () => { if (ui.game) guide(ui.game); };
+    $('show-guide').onchange = () => { if (currentGame) render(); };
     $('speed-fast').onchange = () => { ui.fast = $('speed-fast').checked; };
     $('replay-file').onchange = async (e) => {
       const file = e.target.files[0]; if (!file) return;
-      try { if (file.size > 30 * 1024 * 1024) throw new Error('牌譜は30MB以下にしてください'); const data = JSON.parse(await file.text()); startReview(data); }
-      catch (err) { toast(err.message); } finally { e.target.value = ''; }
+      try {
+        if (file.size > 30 * 1024 * 1024) throw new Error('牌譜は30MB以下にしてください');
+        const text = await file.text(), lower = file.name.toLowerCase();
+        let data = null, external = false;
+        if (text.trimStart().startsWith('<') || lower.endsWith('.mjlog') || lower.endsWith('.xml')) {
+          data = MJ.mjai.toSuitaku(MJ.mjai.fromTenhou(text), { source: 'tenhou' }); external = true;
+        } else {
+          try { data = JSON.parse(text); } catch (_) {}
+          if (!data || !Array.isArray(data.hands)) {
+            data = MJ.mjai.toSuitaku(MJ.mjai.parse(text), { source: 'mjai' }); external = true;
+          }
+        }
+        if (external) {
+          const check = MJ.mjai.validate(data);
+          if (!check.ok) toast('読み込み時の警告：' + check.warnings[0]);
+        }
+        startReview(data);
+      } catch (err) { toast('読み込みできませんでした：' + err.message); }
+      finally { e.target.value = ''; }
+    };
+    $('weights-file').onchange = async (e) => {
+      const file = e.target.files[0]; if (!file) return;
+      try {
+        const data = JSON.parse(await file.text());
+        const source = data && data.weights ? data.weights : data, next = {};
+        let count = 0;
+        for (const key of Object.keys(MJ.ai.weights)) if (Number.isFinite(source[key])) { next[key] = source[key]; count++; }
+        if (!count) throw new Error('AIの重みファイルの形式が正しくありません');
+        ui.aiWeights = MJ.ai.setWeights(next);
+        toast(`AIの重みを読み込みました（${count}項目）`);
+        lobby();
+      } catch (err) { toast(err.message); } finally { e.target.value = ''; }
     };
     for (let i = 0; i < 5; i++) $('dora-info').appendChild(tileEl(0, { small: true, back: true }));
     lobby();

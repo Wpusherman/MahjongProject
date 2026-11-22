@@ -3,6 +3,7 @@ require('../src/shanten.js');
 require('../src/agari.js');
 require('../src/yaku.js');
 require('../src/score.js');
+require('../src/rank.js');
 require('../src/ai.js');
 require('../src/game.js');
 require('../src/record.js');
@@ -25,7 +26,7 @@ const N = parseInt(process.argv[2] || '200', 10);
   for (let hand = 0; hand < N; hand++) {
     const agents = [0, 1, 2, 3].map((s) => MJ.ai.create(s, { level: hand % 10 === 0 ? 'strong' : 'standard' }));
     const game = new MJ.Game({ agents, rng });
-    const res = await game.playHand({ roundWind: 27, dealer, honba, riichiSticks: sticks, scores: scores.slice() });
+    const res = await game.playHand({ roundWind: 27, dealer, honba, riichiSticks: sticks, scores: scores.slice(), hand: hand & 3, mode: 'tonpu' });
     const owned = game.players.flatMap((p) => p.hand.concat(p.discards, p.melds.flatMap((m) => m.tiles)));
     const remaining = game.liveWall.slice(game.wallIndex, game.liveEnd).concat(game.liveWall.slice(game.liveEnd), game.deadWall.slice(game.rinshanIndex));
     assert.equal(new Set(owned.concat(remaining)).size, 136, 'all physical tiles conserved');

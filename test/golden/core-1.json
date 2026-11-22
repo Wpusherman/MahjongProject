@@ -1,0 +1,1000 @@
+{
+  "seed": 1,
+  "config": {
+    "roundWind": 27,
+    "dealer": 1,
+    "honba": 0,
+    "riichiSticks": 0,
+    "scores": [
+      25000,
+      25000,
+      25000,
+      25000
+    ]
+  },
+  "policy": "ai",
+  "actions": [
+    {
+      "type": "discard",
+      "tileId": 1,
+      "riichi": false
+    },
+    {
+      "type": "discard",
+      "tileId": 108,
+      "riichi": false
+    },
+    {
+      "type": "pass"
+    },
+    {
+      "type": "discard",
+      "tileId": 125,
+      "riichi": false
+    },
+    {
+      "type": "discard",
+      "tileId": 132,
+      "riichi": false
+    },
+    {
+      "type": "discard",
+      "tileId": 16,
+      "riichi": true
+    },
+    {
+      "type": "discard",
+      "tileId": 28,
+      "riichi": false
+    },
+    {
+      "type": "pass"
+    },
+    {
+      "type": "discard",
+      "tileId": 19,
+      "riichi": false
+    },
+    {
+      "type": "discard",
+      "tileId": 3,
+      "riichi": false
+    },
+    {
+      "type": "discard",
+      "tileId": 9,
+      "riichi": false
+    },
+    {
+      "type": "pass"
+    },
+    {
+      "type": "discard",
+      "tileId": 29,
+      "riichi": false
+    },
+    {
+      "type": "pass"
+    },
+    {
+      "type": "discard",
+      "tileId": 6,
+      "riichi": false
+    },
+    {
+      "type": "discard",
+      "tileId": 7,
+      "riichi": false
+    },
+    {
+      "type": "discard",
+      "tileId": 43,
+      "riichi": false
+    },
+    {
+      "type": "discard",
+      "tileId": 5,
+      "riichi": false
+    },
+    {
+      "type": "discard",
+      "tileId": 134,
+      "riichi": false
+    },
+    {
+      "type": "discard",
+      "tileId": 42,
+      "riichi": false
+    },
+    {
+      "type": "discard",
+      "tileId": 35,
+      "riichi": false
+    },
+    {
+      "type": "discard",
+      "tileId": 10,
+      "riichi": false
+    },
+    {
+      "type": "discard",
+      "tileId": 135,
+      "riichi": false
+    },
+    {
+      "type": "discard",
+      "tileId": 106,
+      "riichi": false
+    },
+    {
+      "type": "discard",
+      "tileId": 2,
+      "riichi": false
+    },
+    {
+      "type": "discard",
+      "tileId": 124,
+      "riichi": false
+    },
+    {
+      "type": "discard",
+      "tileId": 34,
+      "riichi": false
+    },
+    {
+      "type": "discard",
+      "tileId": 37,
+      "riichi": false
+    },
+    {
+      "type": "discard",
+      "tileId": 133,
+      "riichi": false
+    },
+    {
+      "type": "discard",
+      "tileId": 105,
+      "riichi": false
+    },
+    {
+      "type": "discard",
+      "tileId": 38,
+      "riichi": false
+    },
+    {
+      "type": "discard",
+      "tileId": 116,
+      "riichi": false
+    },
+    {
+      "type": "tsumo"
+    }
+  ],
+  "events": [
+    {
+      "index": 0,
+      "type": "start",
+      "turn": 0,
+      "scores": [
+        25000,
+        25000,
+        25000,
+        25000
+      ],
+      "doraIndicators": [
+        126
+      ]
+    },
+    {
+      "index": 1,
+      "type": "draw",
+      "turn": 0,
+      "seat": 1,
+      "tileId": 110,
+      "rinshan": false,
+      "liveRemaining": 69
+    },
+    {
+      "index": 2,
+      "type": "discard",
+      "turn": 0,
+      "seat": 1,
+      "tileId": 1,
+      "tsumogiri": false,
+      "riichi": false,
+      "called": false,
+      "analysis": null
+    },
+    {
+      "index": 3,
+      "type": "draw",
+      "turn": 1,
+      "seat": 2,
+      "tileId": 28,
+      "rinshan": false,
+      "liveRemaining": 68
+    },
+    {
+      "index": 4,
+      "type": "discard",
+      "turn": 1,
+      "seat": 2,
+      "tileId": 108,
+      "tsumogiri": false,
+      "riichi": false,
+      "called": false,
+      "analysis": null
+    },
+    {
+      "index": 5,
+      "type": "response",
+      "turn": 2,
+      "seat": 1,
+      "from": 2,
+      "tileId": 108,
+      "robKan": null,
+      "action": null,
+      "options": {
+        "tile": 27,
+        "from": 2,
+        "ron": false,
+        "pon": 27,
+        "kan": 27,
+        "chi": []
+      },
+      "analysis": null
+    },
+    {
+      "index": 6,
+      "type": "draw",
+      "turn": 2,
+      "seat": 3,
+      "tileId": 27,
+      "rinshan": false,
+      "liveRemaining": 67
+    },
+    {
+      "index": 7,
+      "type": "discard",
+      "turn": 2,
+      "seat": 3,
+      "tileId": 125,
+      "tsumogiri": false,
+      "riichi": false,
+      "called": false,
+      "analysis": null
+    },
+    {
+      "index": 8,
+      "type": "draw",
+      "turn": 3,
+      "seat": 0,
+      "tileId": 132,
+      "rinshan": false,
+      "liveRemaining": 66
+    },
+    {
+      "index": 9,
+      "type": "discard",
+      "turn": 3,
+      "seat": 0,
+      "tileId": 132,
+      "tsumogiri": true,
+      "riichi": false,
+      "called": false,
+      "analysis": null
+    },
+    {
+      "index": 10,
+      "type": "draw",
+      "turn": 4,
+      "seat": 1,
+      "tileId": 120,
+      "rinshan": false,
+      "liveRemaining": 65
+    },
+    {
+      "index": 11,
+      "type": "discard",
+      "turn": 4,
+      "seat": 1,
+      "tileId": 16,
+      "tsumogiri": false,
+      "riichi": true,
+      "called": false,
+      "analysis": null
+    },
+    {
+      "index": 12,
+      "type": "riichi",
+      "turn": 5,
+      "seat": 1,
+      "doubleRiichi": false
+    },
+    {
+      "index": 13,
+      "type": "draw",
+      "turn": 5,
+      "seat": 2,
+      "tileId": 59,
+      "rinshan": false,
+      "liveRemaining": 64
+    },
+    {
+      "index": 14,
+      "type": "discard",
+      "turn": 5,
+      "seat": 2,
+      "tileId": 28,
+      "tsumogiri": false,
+      "riichi": false,
+      "called": false,
+      "analysis": null
+    },
+    {
+      "index": 15,
+      "type": "response",
+      "turn": 6,
+      "seat": 3,
+      "from": 2,
+      "tileId": 28,
+      "robKan": null,
+      "action": null,
+      "options": {
+        "tile": 7,
+        "from": 2,
+        "ron": false,
+        "pon": null,
+        "kan": null,
+        "chi": [
+          [
+            6,
+            8
+          ]
+        ]
+      },
+      "analysis": null
+    },
+    {
+      "index": 16,
+      "type": "draw",
+      "turn": 6,
+      "seat": 3,
+      "tileId": 6,
+      "rinshan": false,
+      "liveRemaining": 63
+    },
+    {
+      "index": 17,
+      "type": "discard",
+      "turn": 6,
+      "seat": 3,
+      "tileId": 19,
+      "tsumogiri": false,
+      "riichi": false,
+      "called": false,
+      "analysis": null
+    },
+    {
+      "index": 18,
+      "type": "draw",
+      "turn": 7,
+      "seat": 0,
+      "tileId": 116,
+      "rinshan": false,
+      "liveRemaining": 62
+    },
+    {
+      "index": 19,
+      "type": "discard",
+      "turn": 7,
+      "seat": 0,
+      "tileId": 3,
+      "tsumogiri": false,
+      "riichi": false,
+      "called": false,
+      "analysis": null
+    },
+    {
+      "index": 20,
+      "type": "draw",
+      "turn": 8,
+      "seat": 1,
+      "tileId": 9,
+      "rinshan": false,
+      "liveRemaining": 61
+    },
+    {
+      "index": 21,
+      "type": "discard",
+      "turn": 8,
+      "seat": 1,
+      "tileId": 9,
+      "tsumogiri": true,
+      "riichi": false,
+      "called": false,
+      "analysis": null
+    },
+    {
+      "index": 22,
+      "type": "response",
+      "turn": 9,
+      "seat": 2,
+      "from": 1,
+      "tileId": 9,
+      "robKan": null,
+      "action": null,
+      "options": {
+        "tile": 2,
+        "from": 1,
+        "ron": false,
+        "pon": null,
+        "kan": null,
+        "chi": [
+          [
+            1,
+            3
+          ]
+        ]
+      },
+      "analysis": null
+    },
+    {
+      "index": 23,
+      "type": "draw",
+      "turn": 9,
+      "seat": 2,
+      "tileId": 128,
+      "rinshan": false,
+      "liveRemaining": 60
+    },
+    {
+      "index": 24,
+      "type": "discard",
+      "turn": 9,
+      "seat": 2,
+      "tileId": 29,
+      "tsumogiri": false,
+      "riichi": false,
+      "called": false,
+      "analysis": null
+    },
+    {
+      "index": 25,
+      "type": "response",
+      "turn": 10,
+      "seat": 3,
+      "from": 2,
+      "tileId": 29,
+      "robKan": null,
+      "action": null,
+      "options": {
+        "tile": 7,
+        "from": 2,
+        "ron": false,
+        "pon": null,
+        "kan": null,
+        "chi": [
+          [
+            6,
+            8
+          ]
+        ]
+      },
+      "analysis": null
+    },
+    {
+      "index": 26,
+      "type": "draw",
+      "turn": 10,
+      "seat": 3,
+      "tileId": 73,
+      "rinshan": false,
+      "liveRemaining": 59
+    },
+    {
+      "index": 27,
+      "type": "discard",
+      "turn": 10,
+      "seat": 3,
+      "tileId": 6,
+      "tsumogiri": false,
+      "riichi": false,
+      "called": false,
+      "analysis": null
+    },
+    {
+      "index": 28,
+      "type": "draw",
+      "turn": 11,
+      "seat": 0,
+      "tileId": 83,
+      "rinshan": false,
+      "liveRemaining": 58
+    },
+    {
+      "index": 29,
+      "type": "discard",
+      "turn": 11,
+      "seat": 0,
+      "tileId": 7,
+      "tsumogiri": false,
+      "riichi": false,
+      "called": false,
+      "analysis": null
+    },
+    {
+      "index": 30,
+      "type": "draw",
+      "turn": 12,
+      "seat": 1,
+      "tileId": 43,
+      "rinshan": false,
+      "liveRemaining": 57
+    },
+    {
+      "index": 31,
+      "type": "discard",
+      "turn": 12,
+      "seat": 1,
+      "tileId": 43,
+      "tsumogiri": true,
+      "riichi": false,
+      "called": false,
+      "analysis": null
+    },
+    {
+      "index": 32,
+      "type": "draw",
+      "turn": 13,
+      "seat": 2,
+      "tileId": 10,
+      "rinshan": false,
+      "liveRemaining": 56
+    },
+    {
+      "index": 33,
+      "type": "discard",
+      "turn": 13,
+      "seat": 2,
+      "tileId": 5,
+      "tsumogiri": false,
+      "riichi": false,
+      "called": false,
+      "analysis": null
+    },
+    {
+      "index": 34,
+      "type": "draw",
+      "turn": 14,
+      "seat": 3,
+      "tileId": 47,
+      "rinshan": false,
+      "liveRemaining": 55
+    },
+    {
+      "index": 35,
+      "type": "discard",
+      "turn": 14,
+      "seat": 3,
+      "tileId": 134,
+      "tsumogiri": false,
+      "riichi": false,
+      "called": false,
+      "analysis": null
+    },
+    {
+      "index": 36,
+      "type": "draw",
+      "turn": 15,
+      "seat": 0,
+      "tileId": 86,
+      "rinshan": false,
+      "liveRemaining": 54
+    },
+    {
+      "index": 37,
+      "type": "discard",
+      "turn": 15,
+      "seat": 0,
+      "tileId": 42,
+      "tsumogiri": false,
+      "riichi": false,
+      "called": false,
+      "analysis": null
+    },
+    {
+      "index": 38,
+      "type": "draw",
+      "turn": 16,
+      "seat": 1,
+      "tileId": 35,
+      "rinshan": false,
+      "liveRemaining": 53
+    },
+    {
+      "index": 39,
+      "type": "discard",
+      "turn": 16,
+      "seat": 1,
+      "tileId": 35,
+      "tsumogiri": true,
+      "riichi": false,
+      "called": false,
+      "analysis": null
+    },
+    {
+      "index": 40,
+      "type": "draw",
+      "turn": 17,
+      "seat": 2,
+      "tileId": 124,
+      "rinshan": false,
+      "liveRemaining": 52
+    },
+    {
+      "index": 41,
+      "type": "discard",
+      "turn": 17,
+      "seat": 2,
+      "tileId": 10,
+      "tsumogiri": false,
+      "riichi": false,
+      "called": false,
+      "analysis": null
+    },
+    {
+      "index": 42,
+      "type": "draw",
+      "turn": 18,
+      "seat": 3,
+      "tileId": 135,
+      "rinshan": false,
+      "liveRemaining": 51
+    },
+    {
+      "index": 43,
+      "type": "discard",
+      "turn": 18,
+      "seat": 3,
+      "tileId": 135,
+      "tsumogiri": true,
+      "riichi": false,
+      "called": false,
+      "analysis": null
+    },
+    {
+      "index": 44,
+      "type": "draw",
+      "turn": 19,
+      "seat": 0,
+      "tileId": 62,
+      "rinshan": false,
+      "liveRemaining": 50
+    },
+    {
+      "index": 45,
+      "type": "discard",
+      "turn": 19,
+      "seat": 0,
+      "tileId": 106,
+      "tsumogiri": false,
+      "riichi": false,
+      "called": false,
+      "analysis": null
+    },
+    {
+      "index": 46,
+      "type": "draw",
+      "turn": 20,
+      "seat": 1,
+      "tileId": 2,
+      "rinshan": false,
+      "liveRemaining": 49
+    },
+    {
+      "index": 47,
+      "type": "discard",
+      "turn": 20,
+      "seat": 1,
+      "tileId": 2,
+      "tsumogiri": true,
+      "riichi": false,
+      "called": false,
+      "analysis": null
+    },
+    {
+      "index": 48,
+      "type": "draw",
+      "turn": 21,
+      "seat": 2,
+      "tileId": 118,
+      "rinshan": false,
+      "liveRemaining": 48
+    },
+    {
+      "index": 49,
+      "type": "discard",
+      "turn": 21,
+      "seat": 2,
+      "tileId": 124,
+      "tsumogiri": false,
+      "riichi": false,
+      "called": false,
+      "analysis": null
+    },
+    {
+      "index": 50,
+      "type": "draw",
+      "turn": 22,
+      "seat": 3,
+      "tileId": 129,
+      "rinshan": false,
+      "liveRemaining": 47
+    },
+    {
+      "index": 51,
+      "type": "discard",
+      "turn": 22,
+      "seat": 3,
+      "tileId": 34,
+      "tsumogiri": false,
+      "riichi": false,
+      "called": false,
+      "analysis": null
+    },
+    {
+      "index": 52,
+      "type": "draw",
+      "turn": 23,
+      "seat": 0,
+      "tileId": 63,
+      "rinshan": false,
+      "liveRemaining": 46
+    },
+    {
+      "index": 53,
+      "type": "discard",
+      "turn": 23,
+      "seat": 0,
+      "tileId": 37,
+      "tsumogiri": false,
+      "riichi": false,
+      "called": false,
+      "analysis": null
+    },
+    {
+      "index": 54,
+      "type": "draw",
+      "turn": 24,
+      "seat": 1,
+      "tileId": 133,
+      "rinshan": false,
+      "liveRemaining": 45
+    },
+    {
+      "index": 55,
+      "type": "discard",
+      "turn": 24,
+      "seat": 1,
+      "tileId": 133,
+      "tsumogiri": true,
+      "riichi": false,
+      "called": false,
+      "analysis": null
+    },
+    {
+      "index": 56,
+      "type": "draw",
+      "turn": 25,
+      "seat": 2,
+      "tileId": 105,
+      "rinshan": false,
+      "liveRemaining": 44
+    },
+    {
+      "index": 57,
+      "type": "discard",
+      "turn": 25,
+      "seat": 2,
+      "tileId": 105,
+      "tsumogiri": true,
+      "riichi": false,
+      "called": false,
+      "analysis": null
+    },
+    {
+      "index": 58,
+      "type": "draw",
+      "turn": 26,
+      "seat": 3,
+      "tileId": 72,
+      "rinshan": false,
+      "liveRemaining": 43
+    },
+    {
+      "index": 59,
+      "type": "discard",
+      "turn": 26,
+      "seat": 3,
+      "tileId": 38,
+      "tsumogiri": false,
+      "riichi": false,
+      "called": false,
+      "analysis": null
+    },
+    {
+      "index": 60,
+      "type": "draw",
+      "turn": 27,
+      "seat": 0,
+      "tileId": 76,
+      "rinshan": false,
+      "liveRemaining": 42
+    },
+    {
+      "index": 61,
+      "type": "discard",
+      "turn": 27,
+      "seat": 0,
+      "tileId": 116,
+      "tsumogiri": false,
+      "riichi": false,
+      "called": false,
+      "analysis": null
+    },
+    {
+      "index": 62,
+      "type": "draw",
+      "turn": 28,
+      "seat": 1,
+      "tileId": 87,
+      "rinshan": false,
+      "liveRemaining": 41
+    },
+    {
+      "index": 63,
+      "type": "end",
+      "turn": 28,
+      "result": {
+        "type": "win",
+        "winner": 1,
+        "loser": null,
+        "tsumo": true,
+        "score": {
+          "han": 4,
+          "yakuman": false,
+          "yaku": [
+            {
+              "name": "立直",
+              "han": 1
+            },
+            {
+              "name": "門前清自摸和",
+              "han": 1
+            },
+            {
+              "name": "場風牌",
+              "han": 1
+            },
+            {
+              "name": "自風牌",
+              "han": 1
+            }
+          ],
+          "dora": 0,
+          "payments": {
+            "each": 4000,
+            "total": 12000
+          },
+          "fu": 40,
+          "base": 2000
+        },
+        "han": 4,
+        "fu": 40,
+        "yaku": [
+          {
+            "name": "立直",
+            "han": 1
+          },
+          {
+            "name": "門前清自摸和",
+            "han": 1
+          },
+          {
+            "name": "場風牌",
+            "han": 1
+          },
+          {
+            "name": "自風牌",
+            "han": 1
+          }
+        ],
+        "dora": 0,
+        "yakuman": false,
+        "winTile": 87,
+        "sticks": 1,
+        "received": 13000,
+        "uraIndicators": [
+          54
+        ]
+      },
+      "scores": [
+        21000,
+        37000,
+        21000,
+        21000
+      ],
+      "riichiSticks": 0
+    }
+  ],
+  "finalScores": [
+    21000,
+    37000,
+    21000,
+    21000
+  ],
+  "result": {
+    "type": "win",
+    "winner": 1,
+    "loser": null,
+    "tsumo": true,
+    "score": {
+      "han": 4,
+      "yakuman": false,
+      "yaku": [
+        {
+          "name": "立直",
+          "han": 1
+        },
+        {
+          "name": "門前清自摸和",
+          "han": 1
+        },
+        {
+          "name": "場風牌",
+          "han": 1
+        },
+        {
+          "name": "自風牌",
+          "han": 1
+        }
+      ],
+      "dora": 0,
+      "payments": {
+        "each": 4000,
+        "total": 12000
+      },
+      "fu": 40,
+      "base": 2000
+    },
+    "han": 4,
+    "fu": 40,
+    "yaku": [
+      {
+        "name": "立直",
+        "han": 1
+      },
+      {
+        "name": "門前清自摸和",
+        "han": 1
+      },
+      {
+        "name": "場風牌",
+        "han": 1
+      },
+      {
+        "name": "自風牌",
+        "han": 1
+      }
+    ],
+    "dora": 0,
+    "yakuman": false,
+    "winTile": 87,
+    "sticks": 1,
+    "received": 13000,
+    "uraIndicators": [
+      54
+    ]
+  }
+}

@@ -8,6 +8,21 @@
     for (const id of ids) hand.splice(hand.indexOf(id), 1);
     return ids;
   };
+  // The red-five flag of a face-down tile is not public information.
+  const nonRedCopy = (type) => {
+    for (let copy = 0; copy < 4; copy++) if (!T.isRed(type * 4 + copy)) return type * 4 + copy;
+    return type * 4;
+  };
+  const publicMeld = (m) => {
+    const out = Object.assign({}, m, { tiles: m.tiles.slice() });
+    if (!m.open && m.kind === 'kan') {
+      // A concealed kan reveals only its tile type. The outer two tiles are face down;
+      // a red five hidden there is replaced by a plain copy of the same type.
+      out.tiles = m.tiles.map((id, i) => (i === 0 || i === m.tiles.length - 1) && T.isRed(id) ? nonRedCopy(id >> 2) : id);
+      out.concealed = true;
+    }
+    return out;
+  };
 
   function Game(config) {
     this.onEvent = config.onEvent || (() => {});
@@ -29,7 +44,9 @@
   Game.prototype.setup = function (config) {
     Object.assign(this, { roundWind: config.roundWind, dealer: config.dealer, honba: config.honba || 0,
       riichiSticks: config.riichiSticks || 0, turnCount: 0, anyCall: false, ended: false, result: null,
-      wallIndex: 0, liveEnd: 122, rinshanIndex: 0, doraRevealed: 1, currentSeat: config.dealer });
+      wallIndex: 0, liveEnd: 122, rinshanIndex: 0, doraRevealed: 1, currentSeat: config.dealer,
+      handIndex: config.hand != null ? config.hand : 0, mode: config.mode || 'tonpu' });
+    this.handsLeft = Math.max(1, (this.mode === 'hanchan' ? 8 : 4) - this.handIndex);
     this.players = Array.from({ length: 4 }, (_, seat) => ({ seat, hand: [], melds: [], discards: [], river: [],
       discardHistory: [], score: config.scores[seat], riichi: false, doubleRiichi: false, ippatsu: false,
       tempFuriten: false, riichiFuriten: false, drawnTile: null, drawCount: 0, riichiTurn: -1,
@@ -74,21 +91,38 @@
     this.doraIndicators.forEach(dec);
     return u;
   };
-  Game.prototype.buildView = function (seat, extra) {
-    const p = this.players[seat];
-    const opponents = this.players.filter((o) => o.seat !== seat).map((o) => ({ seat: o.seat, riichi: o.riichi,
-      discards: o.discards.slice(), discardTypes: o.discardHistory.map((d) => d.tileId >> 2),
-      discardHistory: clone(o.discardHistory), melds: clone(o.melds), score: o.score, isDealer: o.seat === this.dealer,
-      safeTypes: o.riichi ? [...new Set(this.players.flatMap((x) => x.discardHistory.filter((d) => d.turn >= o.riichiTurn).map((d) => d.tileId >> 2)))] : [] }));
-    return Object.assign({ seat, hand: sortHand(p.hand), melds: clone(p.melds), drawnTile: p.drawnTile,
+  // Public observation for one seat: own hand plus information every player can see.
+  // During play it never contains another player's hand IDs, the wall, the dead wall or
+  // ura indicators. Hands are added only when a result or an explicit replay flag reveals them.
+  Game.prototype.getObservation = function (seat, extra) {
+    const p = this.players[seat], opts = extra || {};
+    const opponents = this.players.filter((o) => o.seat !== seat).map((o) => {
+      const view = { seat: o.seat, handCount: o.hand.length, riichi: o.riichi,
+        discards: o.discards.slice(), discardTypes: o.discardHistory.map((d) => d.tileId >> 2),
+        discardHistory: clone(o.discardHistory), melds: o.melds.map(publicMeld), score: o.score, isDealer: o.seat === this.dealer,
+        safeTypes: o.riichi ? [...new Set(this.players.flatMap((x) => x.discardHistory.filter((d) => d.turn >= o.riichiTurn).map((d) => d.tileId >> 2)))] : [] };
+      const revealedByResult = this.ended && this.result &&
+        (this.result.winner === o.seat || (this.result.tenpai || []).includes(o.seat));
+      if (opts.revealAll || revealedByResult) view.hand = sortHand(o.hand);
+      return view;
+    });
+    const observation = Object.assign({ seat, hand: sortHand(p.hand), melds: clone(p.melds), drawnTile: p.drawnTile,
       discards: this.players.map((x) => x.discards.slice()), doraIndicators: this.doraIndicators.slice(),
-      scores: this.players.map((x) => x.score), roundWind: this.roundWind, seatWind: this.seatWindOf(seat),
+      scores: this.players.map((x) => x.score), seatWinds: this.players.map((_, s) => this.seatWindOf(s)),
+      roundWind: this.roundWind, seatWind: this.seatWindOf(seat),
+      dealer: this.dealer, honba: this.honba, riichiSticks: this.riichiSticks,
+      handIndex: this.handIndex, mode: this.mode, handsLeft: this.handsLeft,
       isDealer: seat === this.dealer, riichi: p.riichi, menzen: !p.melds.some((m) => m.open),
       liveRemaining: this.liveRemaining(), unseen: this.computeUnseen(seat), opponents,
       threat: opponents.some((o) => o.riichi), score: p.score, turnCount: this.turnCount,
       forbidden: p.forbidden.slice(), legalDiscards: p.hand.filter((id) => !p.forbidden.includes(id >> 2)),
-      ownDiscardTypes: p.discardHistory.map((d) => d.tileId >> 2) }, extra || {});
+      ownDiscardTypes: p.discardHistory.map((d) => d.tileId >> 2), ownDiscardHistory: clone(p.discardHistory),
+      currentSeat: this.currentSeat, ended: this.ended, result: clone(this.result), lastDiscard: clone(this.lastDiscard || null) }, extra || {});
+    if (opts.ui) { observation.waits = this.waits(seat); observation.furiten = this.isFuriten(seat); }
+    return observation;
   };
+  // Kept as an alias for older callers; new code should use getObservation.
+  Game.prototype.buildView = function (seat, extra) { return this.getObservation(seat, extra); };
   Game.prototype.waits = function (seat, hand, meldCount) {
     const p = this.players[seat], counts = T.countsFromIds(hand || p.hand), out = [];
     for (let t = 0; t < 34; t++) {
@@ -277,7 +311,7 @@
       if (!opts) continue;
       const agent = this.agents[seat];
       agent.lastCallAnalysis = null;
-      const action = await agent.wantCall(this.buildView(seat, { callTile: tileId, callType: tileId >> 2, callFrom: from, isCallDecision: true }), opts);
+      const action = await agent.wantCall(this.getObservation(seat, { callTile: tileId, callType: tileId >> 2, callFrom: from, isCallDecision: true }), opts);
       if (this.cancelled) return null;
       this.record('response', { seat, from, tileId, robKan: robKan || null, action, options: opts, analysis: agent.lastCallAnalysis });
       if (opts.ron && (!action || action.type !== 'ron')) {
@@ -312,14 +346,14 @@
         this.log(`P${cur + 1} ${rinshan ? '嶺上ツモ' : 'ツモ'}`);
         this.onUpdate();
         const win = this.evalWin(cur, tile, { tsumo: true, rinshan, haitei });
-        if (win && await this.agents[cur].wantTsumo(this.buildView(cur, { win, canTsumo: true }))) {
+        if (win && await this.agents[cur].wantTsumo(this.getObservation(cur, { win, canTsumo: true }))) {
           if (this.cancelled) return null;
           return this.doWin(cur, tile, { tsumo: true, rinshan, haitei }, win);
         }
         if (this.cancelled) return null;
         const kans = this.availableKans(cur);
         if (kans.length) {
-          const k = await this.agents[cur].wantKan(this.buildView(cur, { kans }), kans);
+          const k = await this.agents[cur].wantKan(this.getObservation(cur, { kans }), kans);
           if (this.cancelled) return null;
           if (k) {
             if (!kans.some((x) => x.kind === k.kind && x.tile === k.tile)) throw new Error('Illegal kan');
@@ -333,7 +367,7 @@
       }
       this.onUpdate();
       const wasRiichi = p.riichi;
-      const decision = await this.agents[cur].chooseDiscard(this.buildView(cur, { canRiichi: this.canRiichi(cur), haitei }));
+      const decision = await this.agents[cur].chooseDiscard(this.getObservation(cur, { canRiichi: this.canRiichi(cur), haitei }));
       if (this.cancelled) return null;
       const tileId = wasRiichi ? p.drawnTile : decision.tileId;
       const riichi = !wasRiichi && decision.riichi && this.canRiichi(cur) && this.waits(cur, p.hand.filter((id) => id !== tileId)).length > 0;

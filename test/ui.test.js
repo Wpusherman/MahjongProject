@@ -16,6 +16,36 @@ const { pathToFileURL } = require('node:url');
     assert.equal(await page.locator('#dora-info .tile').count(), 5);
     assert.equal(await page.locator('#dora-info .back').count(), 4);
     assert.equal(await page.locator('#seat-0 .hand-row > :first-child.drawn').count(), 1);
+    // The raw game object is not reachable from the console in the built page.
+    assert.equal(await page.evaluate(() => MJ.ui.game), null);
+    // Opponent hands must be opaque in the DOM: no suit, honor, red or tile-name metadata.
+    for (let seat = 1; seat < 4; seat++) {
+      const tiles = await page.locator(`#seat-${seat} .hand-row .tile`).evaluateAll((nodes) => nodes.map((n) => ({
+        classes: n.className.split(/\s+/).filter(Boolean), title: n.title, aria: n.getAttribute('aria-label') })));
+      assert(tiles.length > 0, `seat ${seat} has hidden hand tiles`);
+      for (const tile of tiles) {
+        assert(!tile.classes.some((c) => ['red', 'm', 'p', 's'].includes(c)), `seat ${seat} leaks a suit or red class`);
+        assert(!tile.classes.some((c) => /^h(2[7-9]|3[0-3])$/.test(c)), `seat ${seat} leaks an honor class`);
+        assert.equal(tile.title, '伏せ牌', `seat ${seat} leaks a tile name in title`);
+        assert.equal(tile.aria, '伏せ牌', `seat ${seat} leaks a tile name in aria-label`);
+      }
+    }
+    // Concealed kan containing the red five: only the public tile type may be rendered.
+    await page.evaluate(() => {
+      window.__SUITAKU_DEBUG__ = true;
+      const p = MJ.ui.game.players[1];
+      window.savedMelds = p.melds;
+      p.melds = [{ kind: 'kan', type: 4, open: false, tiles: [16, 17, 18, 19] }];
+      MJ.ui.render();
+    });
+    assert.equal(await page.locator('#seat-1 .meld .back').count(), 2);
+    assert.equal(await page.locator('#seat-1 .meld .red').count(), 0);
+    const kanBacks = await page.locator('#seat-1 .meld .back').evaluateAll((nodes) => nodes.map((n) => ({ classes: n.className.split(/\s+/), title: n.title })));
+    for (const tile of kanBacks) {
+      assert(!tile.classes.some((c) => ['red', 'm', 'p', 's'].includes(c)));
+      assert.equal(tile.title, '伏せ牌');
+    }
+    await page.evaluate(() => { MJ.ui.game.players[1].melds = window.savedMelds; MJ.ui.render(); });
     await page.screenshot({ path: path.resolve(__dirname, '../test-results/table-desktop.png'), fullPage: true });
     // Construct a long river and verify the exact 6 / 6 / overflow grouping and rotated declaration.
     await page.evaluate(() => {
@@ -97,6 +127,11 @@ const { pathToFileURL } = require('node:url');
     await page.getByRole('button', { name: '閉じる', exact: true }).click();
     await page.locator('#replay-file').setInputFiles({ name: 'roundtrip.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(record)) });
     await page.waitForFunction(() => MJ.ui.review && MJ.ui.review.position === 0);
+    // External mjai JSON Lines can be opened directly from the same file input.
+    const mjaiText = await page.evaluate(() => MJ.mjai.stringify(MJ.mjai.fromSuitaku(MJ.ui.record)));
+    await page.locator('#replay-file').setInputFiles({ name: 'roundtrip.jsonl', mimeType: 'application/json', buffer: Buffer.from(mjaiText) });
+    await page.waitForFunction(() => MJ.ui.review && MJ.ui.review.position === 0 && MJ.ui.record.ai === 'imported');
+    assert.equal(await page.evaluate(() => MJ.ui.record.format), 'suitaku-riichi');
     // Exercise the original commented v1 record if supplied; keep it read-only.
     if (process.argv[2]) {
       await page.locator('#replay-file').setInputFiles(process.argv[2]);
@@ -121,6 +156,7 @@ const { pathToFileURL } = require('node:url');
     await auto.getByRole('button', { name: '対局をはじめる →' }).click();
     await auto.waitForFunction(() => MJ.ui.mode === 'discard');
     const automated = await auto.evaluate(async () => {
+      window.__SUITAKU_DEBUG__ = true;
       const ui = MJ.ui, agent = ui.game.agents[0], view = { ...ui.view, riichi: true };
       const result = await agent.chooseDiscard(view);
       window.tsumoAccepted = null;
