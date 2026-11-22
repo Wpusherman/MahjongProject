@@ -184,7 +184,7 @@ node tools/evaluate.js --seeds 20 --workers 8 --match tonpu --grp models/grp.jso
 - `grp.onnx` は同じMatMul/Add/ReLU/Softmaxで、ONNX Runtime系から読めます。学習時にJSONとONNXの出力差を検査します。ブラウザーで使う場合は `onnxruntime-web` を追加してください（このリポジトリにはまだ依存を追加していません）。
 - 学習データは天鳳mjlogを `tools/mjai-convert.js` で変換した翠卓JSON、または翠卓の自己対戦JSONです。天鳳は30000点返し（オカ20）を `record.mjai.tenhou` に記録します。牌譜データ自体は同梱しません。
 - `--candidate-grp` / `--baseline-grp` で片側だけGRPにできます。`--start-states` と組み合わせると、南3〜南4の実戦に近い開始状態で **GRP版rankBiasと既存rankBiasを直接比較**できます。
-- 自己対戦200試合（3,916サンプル、試合単位8:2分割）の実測は top-1 0.891（点数順 0.502）、期待順位点 MAE 12.08（58.46）、行列の最大行・列誤差 6.7e-16。自己対戦由来で楽観的であり、天鳳実データでの精度ではありません。南3〜4はサンプルが少なく不安定です。
+- 自己対戦200試合（4,724サンプル、試合単位8:2分割、match重複0・重複サンプル0）の実測は top-1 0.444（点数順 0.434）、期待順位点 MAE 54.02（60.98）、行列の最大行・列誤差 4.4e-16。**東1局の top-1 は0.279**（閾値0.35未満）です。以前の 0.891 は自己対戦生成で毎局同じ牌山を使っていたアーティファクトで、修正済みです。全体では点数順をわずかに上回るものの、東4では負けており、自己対戦由来の限界があります。南3〜4はサンプルが少なく不安定です。詳細は [docs/grp.md](docs/grp.md)。
 
 ### 評価（duplicate自己対戦）
 
@@ -204,6 +204,7 @@ node tools/evaluate.js --seeds 500 --workers 8 --level fast --out fast.json
 - `--score-pattern handicap` は既定です。開始点数 `40,000 / 25,000 / 20,000 / 15,000` をシードごとに回転させ、候補の開始位置を4席で変えます。`--score-pattern even` は同点開始です。
 - `--start-states FILE` は天鳳mjlog（または翠卓JSON）から抽出した南3〜南4の開始状態を使います。`node tools/start-states.js <dir> --out data/start-states.jsonl`（既定は南3〜4）。`scores`（供託除く）、`dealer`、`honba`、`riichiSticks`、`handIndex` を読みます。東風のみのディレクトリには南3〜4がないため、半荘データを使うか `--all` を付けてください。
 - 検出力レポートは既定で出力します。実測したクラスタ標準偏差から、効果量 0.2 / 0.5 / 1.0 点を検出するのに必要なシード数とゲーム数を出します（正規近似 `n = (1.96·sd/effect)²`）。
+- `--divergence` は同一局面でcandidateとbaselineの選んだ行動（打牌・リーチ・鳴き/ロン/パス）を比較し、`action divergence` を出します。配線が正しければ同一policyで0%、違うpolicyでは非0になります。南3〜4開始状態の実測: rankBiasあり/なしは **0.1%（12/8092判断）**、GRP版/既存は **0.7%（33/4834判断）**。分岐が起きる局面が少ないことが、順位点差がほぼ0であることの一因です。
 - `--profile` で候補評価1回あたりの内訳（向聴・受入・形・点数・先読み・危険度）を出します。
 - `--level fast` は評価専用の軽量探索です。根候補を12に絞り、非選択候補は受入上限で近似します。標準設定との打牌一致率は98.6%（ランダム公開局面1000件、`node tools/divergence.js --hands 1000 --fast`）。`--root-candidates 5` まで下げると高速ですが一致率は約51%まで落ちます。
 - `--match tonpu|hanchan` は通し対局です。`rankBias` は点差が動いて初めて働くため、通し対局も併用してください。
@@ -218,8 +219,13 @@ node tools/evaluate.js --seeds 500 --workers 8 --level fast --out fast.json
 - 向聴計算をスート別の分解テーブル＋50状態のDPに置き換え、手牌ハッシュのFIFOキャッシュ（標準形20万・総合8万）を付けました。元のDFSは `S.standardReference` として回帰テストに残しています。
 - 受入計算は「手牌+1牌」の全34種を回す前に、改善し得る牌だけを列挙します（標準形は±2以内、七対子・国士は専用規則）。改善牌リストは13枚手牌＋routeでキャッシュし、スート別オプションは3スートを再利用します。
 - `blockShape` は葉ごとの配列・ソート・オブジェクト生成を削減し、約78µs/回 → 約32µs/回にしました。
-- ベンチマーク（同一シード・同一policyのduplicate、handicap、4ワーカー）: 旧8.5 games/s（16局）→ 新38.6–42.5 games/s（同じ16局コマンド、起動込みで4.5–5.0倍）。128局では **56.2 games/s**。`--level fast`（根12）は128局で **54.6 games/s**、標準との打牌一致率98.6%。`--root-candidates 5` はさらに速いが一致率51%です。短い計測はワーカー起動・キャッシュ温まりの影響でぶれます。
-- 数値は `test-results/bench-before.json` / `bench-standard-final2.json` / `bench-fast-k12-final.json` / `divergence-k12.json` に保存しています。CPU・ワーカー数・シード数で変動します。
+- 計測方法を固定しました。**ウォームアップを除く定常値**は次のコマンドで測ります（最初の8シード/ワーカーとワーカー起動を除外し、最も遅いワーカーの実時間で割る）。
+  ```sh
+  node tools/bench-throughput.js --seeds 128 --warmup 8 --workers 4
+  ```
+  標準設定は **65.6 games/s**、`--level fast`（根12）は **66.8 games/s**（同一policyのduplicate）。128シードの起動込みでも63.2 games/s、ウォームアップ区間は52.6 games/sでした。16シードだと定常推定が57.6 games/s、起動込み47.3 games/sとぶれます。**16局と128局の差（42.5 vs 56.2）は、ワーカー起動・モジュール読込・向聴/形キャッシュとJITのウォームアップ**が主因で、定常値そのものはほぼ同じです。比較には128シード以上を使ってください。
+- 旧8.5 games/s（16局、起動込み）→ 同じ16局コマンドで38.6–42.5 games/s（4.5–5.0倍）、定常65.6 games/s。fast（根12）は標準との打牌一致率98.6%、`--root-candidates 5` はさらに速いが一致率51%です。
+- 数値は `test-results/bench-steady-128.json` / `bench-steady-fast-128.json` / `bench-steady-16.json` / `divergence-k12.json` に保存しています。CPU・ワーカー数・シード数で変動します。
 
 ## 効果音・Voicepeak発声
 
@@ -266,6 +272,25 @@ npm run build
 - `npm test` は日常用です。`test/ui.test.js --fast` は初期描画・伏せ牌・河配置・レスポンシブだけを確認します。
 - `npm run test:full` は半荘を最後まで自動進行し、書き出し・読み込み・検討・mjai変換まで確認します。CIでは毎日18:00 UTCに実行します。
 - 評価の高速化・開始状態・GRP比較は `npm run evaluate:fast` / `npm run start-states` と上記の `tools/evaluate.js` オプションを使います。
+
+### Rust core の検証
+
+`rust/` は JS core の移植です。初回は rustup を入れてから実行します。
+
+```sh
+rustup toolchain install stable --component rustfmt clippy
+cargo fmt --manifest-path rust/Cargo.toml --check
+cargo clippy --manifest-path rust/Cargo.toml --all-targets -- -D warnings
+cargo test --manifest-path rust/Cargo.toml
+```
+
+rustup を入れられない環境では Docker でも同じ検査ができます。
+
+```sh
+docker run --rm -v "$PWD/rust:/app" -w /app rust:latest   bash -lc "rustup component add rustfmt clippy && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test"
+```
+
+`rust/Cargo.lock` は再現性のためコミットします。`rust/tests/golden/shanten.json` は、新テーブル実装と旧DFSの等価性を `SHANTEN_CASES=100000 node test/shanten.test.js`（10万件、副露あり、不一致0）で確認した**後**のJS実装から生成した5,000手の golden です。向聴・和了判定の一致を検査します。ゲーム進行のイベント列リプレイは未実装です。
 
 `index.html` が開発用、`mahjong.html` がフォント・CSS・JSを埋め込んだ配布用です。
 
