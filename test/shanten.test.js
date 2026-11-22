@@ -58,7 +58,8 @@ eq(uk.tiles.length >= 1, true, 'ukeire has tiles');
 // hands, including open melds and all counts 0..4.
 let seed = 20261122;
 const rnd = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; };
-for (let i = 0; i < 6000; i++) {
+const equivalenceCases = Number(process.env.SHANTEN_CASES) || 6000;
+for (let i = 0; i < equivalenceCases; i++) {
   const counts = new Array(34).fill(0);
   let left = Math.floor(rnd() * 15);
   while (left > 0) {
