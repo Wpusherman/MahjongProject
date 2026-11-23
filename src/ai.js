@@ -819,7 +819,7 @@
           if (decision) {
             const tileId = pickId(view.hand, decision.tile, view.drawnTile);
             if (tileId != null) return { tileId, riichi: decision.riichi,
-              analysis: { version: AI.version, policy: true, model: 'obs-v1-resnet', probabilities: decision.probabilities } };
+              analysis: { version: AI.version, policy: true, model: 'obs-v2-resnet', probabilities: decision.probabilities } };
           }
         }
         const analysis = AI.analyzeDiscard(view, opts.level || 'strong', weights,

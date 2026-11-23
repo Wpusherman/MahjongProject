@@ -5,7 +5,7 @@
 //
 // Each JSONL line contains the 34×C tile tensor, global scalars, and an action label.
 // Convert JSONL shards to Parquet with: python tools/to_parquet.py <in.jsonl> --out <dir>
-// Schema documentation: docs/features.md (version obs-v1).
+// Schema documentation: docs/features.md (version obs-v2).
 const fs = require('node:fs');
 const zlib = require('node:zlib');
 const path = require('node:path');

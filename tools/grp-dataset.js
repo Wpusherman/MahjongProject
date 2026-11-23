@@ -5,7 +5,7 @@
 //   node tools/grp-dataset.js game.json --out data/grp.jsonl --rank tenhou
 //
 // Each row is { v, hand, seat, x, rank, finalScore, scoreDelta }. The feature
-// order is MJ.grp.FEATURES (grp-v1); the label is the final placement.
+// order is MJ.grp.FEATURES (grp-v2); the label is the final placement.
 const fs = require('node:fs');
 const path = require('node:path');
 const zlib = require('node:zlib');

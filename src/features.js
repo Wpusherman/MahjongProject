@@ -1,7 +1,7 @@
 (function () {
   const MJ = (globalThis.MJ = globalThis.MJ || {});
   const T = MJ.tiles;
-  const F = (MJ.features = { version: 'obs-v1' });
+  const F = (MJ.features = { version: 'obs-v2' });
   const countIds = (ids) => {
     const c = new Array(34).fill(0);
     for (const id of ids || []) c[id >> 2]++;
@@ -90,6 +90,7 @@
     const seat = obs.seat;
     // Score and riichi slots follow the match's starting seat order (0 = 起家),
     // not absolute seat numbers. startDealer defaults to 0 for older records.
+    // This is the obs-v2 slot meaning; obs-v1 used absolute seat order.
     const startDealer = Number.isInteger(obs.startDealer) ? obs.startDealer : 0;
     const seatAt = (slot) => (startDealer + slot) % 4;
     const values = [];
@@ -220,10 +221,16 @@
       x: Array.from(s.x.data), label: s.label, meta: s.meta })).join('\n') + '\n';
   };
   F.fromJSONL = function (text) {
-    return String(text).split(/\r?\n/).filter(Boolean).map((line) => {
+    const lines = String(text).split(/\r?\n/).filter(Boolean);
+    let legacy = 0;
+    const legacyVersions = new Set();
+    const rows = lines.map((line) => {
       const row = JSON.parse(line);
+      if (row.v !== F.version) { legacy++; legacyVersions.add(row.v || 'missing'); }
       return { hand: row.hand, eventIndex: row.event, seat: row.seat, label: row.label, meta: row.meta,
         x: { version: row.v, channelNames: row.channels, globalNames: row.globals, shape: row.shape, data: Float32Array.from(row.x) } };
     });
+    if (legacy) console.warn(`features.fromJSONL: ${legacy}/${lines.length} rows use ${[...legacyVersions].join(', ')} (expected ${F.version}); regenerate old shards before training.`);
+    return rows;
   };
 })();

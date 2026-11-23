@@ -3,7 +3,7 @@
 
 The input is the JSONL produced by tools/grp-dataset.js:
 
-  {"v":"grp-v1","x":[...17 floats...],"rank":1..4,...}
+  {"v":"grp-v2","x":[...17 floats...],"rank":1..4,...}
 
 The model estimates P(final placement | current standings). Only NumPy is
 required for training; ONNX export additionally needs the `onnx` package.
@@ -33,7 +33,7 @@ FEATURES = [
     "honba", "riichi_sticks", "hands_left", "round_progress", "dealer",
     "seat0", "seat1", "seat2", "seat3",
 ]
-VERSION = "grp-v1"
+VERSION = "grp-v2"
 
 
 UMA = np.asarray([90.0, 45.0, 0.0, -135.0])  # Tenhou-style rank points
@@ -51,6 +51,7 @@ class Sample:
 
 def read_jsonl(paths: list[str]) -> list[Sample]:
     rows: list[Sample] = []
+    legacy = 0
     for path in paths:
         with open(path, "r", encoding="utf-8") as handle:
             for line_no, line in enumerate(handle, 1):
@@ -60,7 +61,8 @@ def read_jsonl(paths: list[str]) -> list[Sample]:
                 row = json.loads(line)
                 version = row.get("v", VERSION)
                 if version != VERSION:
-                    raise ValueError(f"{path}:{line_no}: unsupported GRP version {version!r}")
+                    legacy += 1
+                    continue
                 x = row.get("x")
                 rank = row.get("rank")
                 if not isinstance(x, list) or len(x) != len(FEATURES):
@@ -73,6 +75,8 @@ def read_jsonl(paths: list[str]) -> list[Sample]:
                 hand = int(row.get("hand", row.get("handIndex", 0)) or 0)
                 hand_index = int(row.get("handIndex", hand) or 0)
                 rows.append(Sample(np.asarray(x, dtype=np.float64), rank - 1, path, match, hand, hand_index))
+    if legacy:
+        print(f"warning: skipped {legacy} GRP rows with version != {VERSION}; regenerate old shards", file=sys.stderr)
     if not rows:
         raise ValueError("no GRP samples found")
     return rows

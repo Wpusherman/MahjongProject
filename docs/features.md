@@ -1,6 +1,8 @@
 # 特徴量スキーマ
 
-`src/features.js` の `MJ.features.version` は **`obs-v1`** です。テンソルの形・チャンネル順・グローバル特徴の順序を変えるときは、この版と `docs/features.md` を同時に更新してください。学習データ側は `x.v`（JSONL）と `feature_version`（Parquet）に版を記録します。
+`src/features.js` の `MJ.features.version` は **`obs-v2`** です。テンソルの形・チャンネル順・グローバル特徴の順序を変えるときは、この版と `docs/features.md` を同時に更新してください。学習データ側は `x.v`（JSONL）と `feature_version`（Parquet）に版を記録します。`F.fromJSONL`、`tools/policy/train_policy.py`、`tools/to_parquet.py` は `obs-v1` など異なる版の行を検出すると警告を出します（学習側はスキップ）。
+
+**obs-v2 の変更点**: 点数・供託・席のスロットを「絶対席番号」ではなく **起家（東1局の親）からの席順** に統一しました。`score0` / `diff0` / `riichi0` は起家、`score1` … は起家の下家、… の順です。`startDealer` が無い古い観測では 0（従来の絶対席順）にフォールバックしますが、`obs-v1` の学習シャードとは混在できません。
 
 ## テンソル
 
@@ -67,10 +69,10 @@
 `node tools/features.js <record> <out.jsonl>` の1行:
 
 ```json
-{"v":"obs-v1","match":"2026112314gm-...","hand":0,"event":12,"seat":0,"channels":[...],"globals":[...],
+{"v":"obs-v2","match":"2026112314gm-...","hand":0,"event":12,"seat":0,"channels":[...],"globals":[...],
  "shape":{"channels":25,"tiles":34,"globals":31},"x":[...881 floats...],
  "label":{"kind":"discard","tile":4,"riichi":false,"tsumogiri":true,"forced":false,"canRiichi":false},
- "meta":{"version":"obs-v1","hand":0,"eventIndex":12,"seat":0,"turn":3,"kind":"discard","riichi":false}}
+ "meta":{"version":"obs-v2","hand":0,"eventIndex":12,"seat":0,"turn":3,"kind":"discard","riichi":false}}
 ```
 
 `match` は試合単位のtrain/val分割に使います。
@@ -87,7 +89,7 @@
 
 ## GRP（順位分布モデル）
 
-`src/grp.js` の版は **`grp-v1`** です。`MJ.grp.FEATURES` の順序が契約です。
+`src/grp.js` の版は **`grp-v2`** です。`MJ.grp.FEATURES` の順序が契約です。`grp-v1`（絶対席順）のモデルは `MJ.rank.setRankModel` / `G.validateModel` が拒否します。
 
 | # | 名前 | 定義 |
 |---:|---|---|

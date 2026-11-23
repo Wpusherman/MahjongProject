@@ -1,4 +1,4 @@
-# GRP（順位分布モデル）— grp-v1
+# GRP（順位分布モデル）— grp-v2
 
 局開始時点の順位状況から **最終順位の分布** を推定するモデルです。勝率や和了率ではありません。`MJ.rank.setRankModel(model)` で `expectedPoints()` / `riskBias()` のヒューリスティックな順位点EVを置き換えます。
 
@@ -7,12 +7,13 @@
 `tools/grp-dataset.js` は1局開始につき4席分のサンプルを作ります。
 
 ```json
-{"v":"grp-v1","match":"2026-10-13T09:48:02.146Z","hand":2,"handIndex":2,"seat":0,
- "x":[17 floats],"rank":1,"finalScore":35000,"scoreDelta":10000}
+{"v":"grp-v2","match":"2026-10-13T09:48:02.146Z","hand":2,"handIndex":2,"seat":0,
+ "startDealer":1,"x":[17 floats],"rank":1,"finalScore":35000,"scoreDelta":10000}
 ```
 
 - `match` は1試合を識別します。**学習・検証は試合（半荘）単位で分割**してください。同じ試合の局を両側に入れると、似た局面が検証側へ漏れて精度が楽観的になります。
 - `hand` / `handIndex` は東1〜南4の局番号です（0始まり）。指標を局別に出すために使います。
+- **grp-v2 の席スロット**: `score0..3` / `diff0..3` / `seat0..3` は絶対席番号ではなく **起家（東1局の親）からの席順** です。`startDealer` が 1 のとき `score0` は席1、`seat0` は席1を指します。`rank` の同点順も `startDealer` で決めます。`grp-v1`（絶対席順）のモデル/シャードは読み込めません。
 - ラベル `rank` は最終順位 1–4 で、天鳳の30000点返し（オカ20）は `record.mjai.tenhou` に記録されます。順位点の比較時は rankConfig の差を適用してください。
 
 ```bash

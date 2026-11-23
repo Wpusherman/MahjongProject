@@ -19,6 +19,11 @@
       meta = JSON.parse(fs.readFileSync(file.replace(/\.onnx$/i, '.json'), 'utf8'));
     } catch (_) { meta = null; }
     const priors = meta && meta.classWeights ? meta.classWeights : null;
+    if (meta && meta.featureVersion && meta.featureVersion !== MJ.features.version) {
+      console.warn(`policy.load: model featureVersion ${meta.featureVersion} != ${MJ.features.version}; retrain the model.`);
+    } else if (meta && !meta.featureVersion) {
+      console.warn(`policy.load: model metadata has no featureVersion; expected ${MJ.features.version}.`);
+    }
     return { file, session, ort, inputNames: session.inputNames, outputNames: session.outputNames,
       priors, meta,
       shape: MJ.features && MJ.features.CHANNELS ? { channels: MJ.features.CHANNELS.length, globals: MJ.features.GLOBAL_NAMES.length } : null };

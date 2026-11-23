@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Train the obs-v1 policy network and export ONNX.
+"""Train the obs-v2 policy network and export ONNX.
 
 Input is the JSONL from tools/policy-dataset.js. The network is a small Mortal-
 style ResNet over the 34-tile axis with four heads:
@@ -30,20 +30,25 @@ import torch.nn.functional as F
 
 CALL_NAMES = ["pass", "chi", "pon", "kan", "ron"]
 CALL_INDEX = {name: i for i, name in enumerate(CALL_NAMES)}
+FEATURE_VERSION = "obs-v2"
 
 
 def read_rows(path: str, max_discard: int) -> list[dict]:
     rows = []
     discard_count = 0
+    legacy = 0
     with open(path, "r", encoding="utf-8") as handle:
         for line in handle:
             line = line.strip()
             if not line:
                 continue
             row = json.loads(line)
+            if row.get("v") != FEATURE_VERSION:
+                legacy += 1
+                continue
             shape = row.get("shape") or {}
             if shape.get("tiles") != 34:
-                raise ValueError("obs-v1 requires 34 tiles")
+                raise ValueError("obs-v2 requires 34 tiles")
             label = row.get("label") or {}
             kind = label.get("kind")
             if kind == "discard":
@@ -52,6 +57,10 @@ def read_rows(path: str, max_discard: int) -> list[dict]:
                 discard_count += 1
             row["_kind"] = kind
             rows.append(row)
+    if legacy:
+        print(f"warning: skipped {legacy} policy rows with feature version != {FEATURE_VERSION}; regenerate old shards", file=sys.stderr)
+    if not rows:
+        raise SystemExit(f"no {FEATURE_VERSION} policy rows found")
     return rows
 
 
@@ -305,6 +314,7 @@ def main() -> int:
         avg = {k: (v / steps) for k, v in total.items()}
         print(f"epoch {epoch}: " + " ".join(f"{k} {v:.4f}" for k, v in avg.items()))
     result = {"width": args.width, "blocks": args.blocks, "channels": channels, "globals": globals_n,
+              "featureVersion": FEATURE_VERSION,
               "trainRows": len(train_rows), "valRows": len(val_rows), "epochs": args.epochs,
               "heads": {kind: {"train": heads[kind]["train"].get("n_len", 0), "val": heads[kind]["val"].get("n_len", 0)} for kind in heads}}
     result["metrics"] = metrics(model, {k: v["train"] for k, v in heads.items()}, {k: v["val"] for k, v in heads.items()})

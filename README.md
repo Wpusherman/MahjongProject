@@ -143,7 +143,7 @@ node tools/mjai-smoke.js out.jsonl
 - サンプルは行動直前の `getObservation(seat)` から作るため、他家の手牌・牌山・裏ドラはテンソルに入りません（`test/features.test.js` で他家の手牌を入れ替えてもテンソルが不変なことを検証）。
 - JSONLの1行が1サンプルです。ゲーム単位でファイルを分ければシャードになり、行単位のストリーミングDataLoaderで読めます。
 
-チャンネル定義とスキーマ版（`obs-v1`、34×25＋31）は [docs/features.md](docs/features.md) にあります。チャンネルや順序を変えるときは版を上げてください。
+チャンネル定義とスキーマ版（`obs-v2`、34×25＋31）は [docs/features.md](docs/features.md) にあります。チャンネルや順序を変えるときは版を上げてください。obs-v2 では点数・供託・席のスロットが **起家（東1局の親）からの席順** になりました。`obs-v1` のシャードは読み込み時に警告され、学習ではスキップされます。
 
 Parquetが必要な場合は `tools/to_parquet.py` を使います（`pyarrow` が必要）。
 
@@ -152,7 +152,7 @@ python tools/to_parquet.py features-*.jsonl --out data/parquet --shard-size 1000
 ```
 
 - シャード分割、行数・チャンネル名・グローバル名を `_metadata.json` に記録します。
-- ファイルメタデータに `features-parquet-v1` と `feature_version`（`obs-v1`）を保存します。
+- ファイルメタデータに `features-parquet-v1` と `feature_version`（`obs-v2`）を保存します。旧版の行が混ざると `to_parquet.py` が警告します。
 - `x` は881次元の `list<float>` のまま保存します。学習側で `reshape(25, 34)` と末尾31に分けます。
 
 ### 天鳳一括パイプライン（教師あり学習）
@@ -171,7 +171,7 @@ node tools/tenhou-pipeline.js <mjlog-dir> \
 
 ### 順位分布モデル（GRP）
 
-`src/grp.js` は Game Result Prediction の入力スキーマ（`grp-v1`、17特徴）と推論器です。局開始時点の (局, 本場, 供託, 4人の点数, 残り局数, 席) から最終順位の分布を推定します。詳細と実測値は [docs/grp.md](docs/grp.md) を参照してください。
+`src/grp.js` は Game Result Prediction の入力スキーマ（`grp-v2`、17特徴）と推論器です。局開始時点の (局, 本場, 供託, 4人の点数, 残り局数, 席) から最終順位の分布を推定します。**grp-v2 では点数・席スロットが起家（東1局の親）基準** で、`startDealer` が同点順も決めます。`grp-v1` のモデルは `validateModel` が拒否します。詳細と実測値は [docs/grp.md](docs/grp.md) を参照してください。
 
 ```bash
 node tools/grp-dataset.js "Saved Data" test-results/selfplay-200 --out data/grp.jsonl
@@ -191,7 +191,7 @@ node tools/evaluate.js --seeds 20 --workers 8 --match tonpu --grp models/grp.jso
 
 ### 教師あり方策ネット（2026-11-23）
 
-天鳳鳳凰卓の牌譜から、obs-v1（25×34 + 31）を入力とするResNet方策ネットを学習できます。
+天鳳鳳凰卓の牌譜から、obs-v2（25×34 + 31、起家基準の席スロット）を入力とするResNet方策ネットを学習できます。
 
 - 取得: `node tools/tenhou-fetch.js --hours 6 --logs 240 --out data/tenhou`。鳳凰卓（四鳳・赤・喰いタン）の牌譜IDを時間別インデックスから拾い、`tenhou.net/0/log/?<id>` を保存します。**牌譜データは `data/`（gitignore）に置き、コミットしません。**
 - 変換: `node tools/tenhou-pipeline.js data/tenhou --out-features ... --out-report ...`。strictでルール差を除外し、失敗率・除外理由・判断数をレポートします。今回の143件では118件成功・25件除外・失敗0、1,203局・58,458判断（打牌58,026・ツモ432）でした。

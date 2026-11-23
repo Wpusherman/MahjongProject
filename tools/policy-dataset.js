@@ -1,5 +1,5 @@
 'use strict';
-// Build obs-v1 policy-training samples from a directory of Tenhou mjlog files.
+// Build obs-v2 policy-training samples from a directory of Tenhou mjlog files.
 //
 //   node tools/policy-dataset.js data/tenhou --out test-results/policy-tenhou.jsonl
 //

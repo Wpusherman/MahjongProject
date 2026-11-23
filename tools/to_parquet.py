@@ -26,6 +26,7 @@ except ImportError as exc:  # pragma: no cover - exercised by environments witho
     raise SystemExit(2) from exc
 
 SCHEMA_VERSION = "features-parquet-v1"
+FEATURE_VERSION = "obs-v2"
 
 
 def row_from(line: str, path: str, line_no: int) -> dict:
@@ -103,6 +104,7 @@ def main() -> int:
     shards: list[dict] = []
     total = 0
     shard_index = 0
+    legacy = 0
     feature_versions: set[str] = set()
     channel_names: set[str] = set()
     global_names: set[str] = set()
@@ -116,6 +118,8 @@ def main() -> int:
                 row = row_from(line, path, line_no)
                 row["schema_version"] = args.schema_version
                 feature_versions.add(row["feature_version"])
+                if row["feature_version"] != FEATURE_VERSION:
+                    legacy += 1
                 channel_names.add(row["channel_names"])
                 global_names.add(row["global_names"])
                 shards.append(row)
@@ -140,6 +144,8 @@ def main() -> int:
             "suitaku.created_at": datetime.now(timezone.utc).isoformat(),
         })
         files.append({"path": name, "rows": len(shards)})
+    if legacy:
+        print(f"warning: {legacy}/{total} rows use feature_version != {FEATURE_VERSION}; regenerate old shards", file=sys.stderr)
     metadata = {
         "schemaVersion": args.schema_version,
         "featureVersions": sorted(feature_versions),

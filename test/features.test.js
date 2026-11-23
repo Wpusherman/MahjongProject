@@ -63,6 +63,24 @@ async function makeRecord(seed) {
   assert.equal(back.length, 3);
   assert.deepEqual(Array.from(back[0].x.data), Array.from(samples[0].x.data));
   assert.deepEqual(back[0].label, samples[0].label);
+  assert.equal(F.version, 'obs-v2');
+  // Loading an old shard warns instead of silently mixing seat-slot meanings.
+  const legacyText = text.replace('"v":"obs-v2"', '"v":"obs-v1"');
+  const warnings = [], oldWarn = console.warn;
+  console.warn = (...args) => warnings.push(args.join(' '));
+  const legacyRows = F.fromJSONL(legacyText);
+  console.warn = oldWarn;
+  assert.equal(legacyRows.length, 3);
+  assert(warnings.some((w) => w.includes('obs-v1') && w.includes('obs-v2')), 'legacy shards warn');
+  // obs-v2 score slots follow the start dealer, not absolute seat numbers.
+  const shiftedSeat = sample.seat;
+  const startDealer = (shiftedSeat + 1) % 4;
+  const shiftedScores = [10000, 20000, 30000, 40000];
+  const shifted = { ...game.getObservation(shiftedSeat), startDealer, scores: shiftedScores };
+  const shiftedX = F.encode(shifted), globalOffset = F.CHANNELS.length * 34;
+  const near = (actual, expected) => Math.abs(actual - expected) < 1e-6;
+  assert(near(shiftedX.data[globalOffset], (shiftedScores[startDealer] - 25000) / 100000), 'score0 is the start dealer slot');
+  assert(near(shiftedX.data[globalOffset + 1], (shiftedScores[(startDealer + 1) % 4] - 25000) / 100000), 'score1 follows the seat order');
 
   // External mjai records use the same encoder.
   const mjaiRecord = MJ.mjai.toSuitaku(MJ.mjai.fromSuitaku(record), { createdAt: '2026-01-01T00:00:00.000Z' });

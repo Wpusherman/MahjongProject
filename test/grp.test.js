@@ -14,7 +14,7 @@ const record = {
 const rows = G.dataset(record);
 assert.equal(rows.length, 12, 'one row per seat at each hand start');
 for (const row of rows) {
-  assert.equal(row.v, 'grp-v1');
+  assert.equal(row.v, 'grp-v2');
   assert.equal(row.x.length, G.FEATURES.length);
   assert(row.x.every(Number.isFinite));
   assert(row.rank >= 1 && row.rank <= 4);
@@ -32,9 +32,16 @@ assert.equal(even.length, G.FEATURES.length);
 assert(even.slice(4, 8).every((v) => v === 0));
 assert.equal(even[13 + 2], 1, 'seat one-hot marks seat 2');
 assert.deepEqual(G.dataset(JSON.parse(JSON.stringify(record))), rows, 'dataset is deterministic');
+// grp-v2: score/seat slots are ordered from the match's East-1 dealer.
+const relative = G.encode({ scores: [10000, 20000, 30000, 40000], seat: 0, startDealer: 1,
+  handsLeft: 4, handIndex: 0, dealer: 1, honba: 0, riichiSticks: 0 });
+assert.equal(relative[0], 20, 'slot 0 is the East-1 dealer');
+assert.equal(relative[1], 30, 'slot 1 is the next seat');
+assert.equal(relative[13], 0, 'slot 0 is the East-1 dealer seat, not absolute seat 0');
+assert.equal(relative[16], 1, 'seat slot 3 marks absolute seat 0 when startDealer is 1');
 
 const constant = {
-  version: 'grp-v1', features: G.FEATURES.slice(), mean: Array(G.FEATURES.length).fill(0),
+  version: 'grp-v2', features: G.FEATURES.slice(), mean: Array(G.FEATURES.length).fill(0),
   std: Array(G.FEATURES.length).fill(1),
   layers: [{ w: Array.from({ length: G.FEATURES.length }, () => [0, 0, 0, 0]), b: [1, 1, 1, 1] }]
 };
@@ -42,8 +49,10 @@ R.setRankModel(constant);
 const evenPoints = R.expectedPoints([25000, 25000, 25000, 25000], 0, 0, 'tenhou', { handsLeft: 4 });
 assert.deepEqual(evenPoints.probabilities.map((p) => +p.toFixed(9)), [0.25, 0.25, 0.25, 0.25]);
 assert.equal(evenPoints.points, 0);
-assert.equal(R.GRP.model.version, 'grp-v1');
+assert.equal(R.GRP.model.version, 'grp-v2');
 assert.throws(() => R.setRankModel({ ...constant, version: 'grp-v0' }), /version/);
+assert.throws(() => R.setRankModel({ ...constant, version: 'grp-v1' }), /version/,
+  'the old absolute-seat model must not load into grp-v2');
 R.clearRankModel();
 assert.equal(R.GRP.model, null);
 assert.equal(R.expectedPoints([25000, 25000, 25000, 25000], 0, 0, 'tenhou', { handsLeft: 4 }).probabilities, undefined);

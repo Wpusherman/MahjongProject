@@ -1,6 +1,6 @@
 (function () {
   const MJ = (globalThis.MJ = globalThis.MJ || {});
-  const G = (MJ.grp = { version: 'grp-v1' });
+  const G = (MJ.grp = { version: 'grp-v2' });
 
   // Feature order is part of the versioned contract. tools/grp-dataset.js,
   // tools/grp/train_grp.py and docs/features.md must agree with this list.

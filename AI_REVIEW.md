@@ -170,7 +170,7 @@ node tools/evaluate.js --seeds 80 --fast --start-states test-results/start-state
 
 東1は指定の正常範囲 **0.25〜0.30** に入りました。天鳳の南3〜4は検証各100件前後で、自己対戦より平坦・低精度です。自己対戦の東3〜4の高精度は同質な相手・牌山進行に支えられた楽観値で、実データでは順位予測により多くの情報（和了やめ、押し引き、相手力量）が必要だと分かります。全体では点数順よりtop-1が低く、MAEは良いため「順位を当てる」より「順位点を平均的に見る」用途に向きます。
 
-- 方策ネット: `tools/policy/train_policy.py` に obs-v1（25×34 + 31）入力のResNet（畳み込み＋残差ブロック、打牌34・リーチ2・鳴き5・和了2の4ヘッド、合法手マスク）を実装。試合単位でtrain/valを分離し、判断種別の一致率を出します。学習したクラス重みは推論時に `log p = log softmax − log w` で補正します（`src/policy.js`）。
+- 方策ネット: `tools/policy/train_policy.py` に obs-v2（25×34 + 31、起家基準の席スロット）入力のResNet（畳み込み＋残差ブロック、打牌34・リーチ2・鳴き5・和了2の4ヘッド、合法手マスク）を実装。試合単位でtrain/valを分離し、判断種別の一致率を出します。学習したクラス重みは推論時に `log p = log softmax − log w` で補正します（`src/policy.js`）。
 - ONNXは `policy.onnx` に出力し、`onnxruntime-node` で推論します。`node tools/evaluate.js --candidate-policy <onnx>` で既存AIとのduplicate比較ができます。ワーカーはONNXセッションをcloneできないため、各ワーカーがファイルから1回ロードします。`MJ.policy.predictBatch` でバッチ推論も可能です。
 - 10ブロック/128ch・2エポック（打牌20,000＋全鳴きサンプル）の本学習結果:
   - 打牌 top-1 **42.1%**（合法手マスク後 **43.8%**）、リーチ **55.4%**（陽性率42.4%）、鳴き5クラス **53.5%**（pass 49.2% / chi 66.2% / pon 87.8% / ron 42.2%、kanは検証0件）、和了100%（陽性率100%で負例なし）。ONNX差 1.2e-06。
@@ -189,6 +189,12 @@ node tools/evaluate.js --seeds 80 --fast --start-states test-results/start-state
 ### 項目5（任意）
 
 手役志向パラメータ（染め手・役牌重なり・三色・ドラ寄せ）は今回未実装です。rank EVと方策ネットの結果を踏まえ、style重みを入れる場合は「重み0とのduplicateで順位点/半荘を測る」同じ評価系に接続するのが次の作業です。
+
+### 特徴量・GRPの版上げ（obs-v2 / grp-v2）
+
+- 席スロットの意味を **絶対席番号 → 起家（東1局の親）からの席順** に変更しました。`score0..3` / `diff0..3` / `riichi0..3` と GRP の `seat0..3` は slot 0 = 起家です。`startDealer` が無い古い観測は 0 にフォールバックします。
+- `MJ.features.version` は **obs-v2**、`MJ.grp.version` は **grp-v2**。`F.fromJSONL` は旧 `obs-v1` 行を検出すると警告し、`tools/policy/train_policy.py` と `tools/to_parquet.py` は旧行をスキップ/警告します。`G.validateModel` は `grp-v1` モデルを拒否します。
+- `test/features.test.js` で旧シャード警告と起家基準スロット、`test/grp.test.js` で `grp-v1` 拒否とスロット順を回帰確認します。
 
 ## 調査資料
 

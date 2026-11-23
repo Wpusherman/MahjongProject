@@ -1047,7 +1047,7 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
   <script>
 (function () {
   const MJ = (globalThis.MJ = globalThis.MJ || {});
-  const G = (MJ.grp = { version: 'grp-v1' });
+  const G = (MJ.grp = { version: 'grp-v2' });
 
   // Feature order is part of the versioned contract. tools/grp-dataset.js,
   // tools/grp/train_grp.py and docs/features.md must agree with this list.
@@ -2071,7 +2071,7 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
           if (decision) {
             const tileId = pickId(view.hand, decision.tile, view.drawnTile);
             if (tileId != null) return { tileId, riichi: decision.riichi,
-              analysis: { version: AI.version, policy: true, model: 'obs-v1-resnet', probabilities: decision.probabilities } };
+              analysis: { version: AI.version, policy: true, model: 'obs-v2-resnet', probabilities: decision.probabilities } };
           }
         }
         const analysis = AI.analyzeDiscard(view, opts.level || 'strong', weights,
@@ -2304,10 +2304,11 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
   };
   // Kept as an alias for older callers; new code should use getObservation.
   Game.prototype.buildView = function (seat, extra) { return this.getObservation(seat, extra); };
-  Game.prototype.waits = function (seat, hand, meldCount) {
+  Game.prototype.waits = function (seat, hand, meldCount, extraMelds) {
     const p = this.players[seat], counts = T.countsFromIds(hand || p.hand), out = [];
+    const melds = extraMelds && extraMelds.length ? p.melds.concat(extraMelds) : p.melds;
     for (let t = 0; t < 34; t++) {
-      const owned = counts[t] + p.melds.reduce((n, m) => n + m.tiles.filter((id) => (id >> 2) === t).length, 0);
+      const owned = counts[t] + melds.reduce((n, m) => n + m.tiles.filter((id) => (id >> 2) === t).length, 0);
       if (owned >= 4) continue;
       counts[t]++;
       if (MJ.agari.isAgari(counts, meldCount == null ? p.melds.length : meldCount)) out.push(t);
@@ -2379,11 +2380,26 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
         const before = p.hand.filter((id) => id !== p.drawnTile);
         const after = p.hand.filter((id) => (id >> 2) !== t);
         const waits = this.waits(seat, before);
-        if (JSON.stringify(waits) !== JSON.stringify(this.waits(seat, after, p.melds.length + 1))) continue;
+        // The four tiles of the proposed kan are already visible, so the tile
+        // itself cannot be a wait after the kan. Passing the hypothetical meld
+        // to waits() keeps the owned-count check exact.
+        const quad = p.hand.filter((id) => (id >> 2) === t);
+        const afterWaits = this.waits(seat, after, p.melds.length + 1,
+          [{ kind: 'kan', type: t, open: false, tiles: quad }]);
+        if (JSON.stringify(waits) !== JSON.stringify(afterWaits)) continue;
         if (riichiAnkan === 'strict') {
           // Every winning decomposition must use the original three tiles as a triplet.
+          // Special hands (seven pairs / thirteen orphans) have no triplet, so they
+          // fail strict mode too.
           const c = T.countsFromIds(before);
-          if (waits.some((w) => { c[w]++; const ds = MJ.agari.decompose(c); c[w]--; return ds.some((d) => !d.sets.some((s) => s.kind === 'trip' && s.type === t)); })) continue;
+          if (waits.some((w) => {
+            c[w]++;
+            const special = MJ.agari.isChiitoi(c, 0) || MJ.agari.isKokushi(c, 0);
+            const ds = MJ.agari.decompose(c).filter((d) => d.sets.length === 4);
+            c[w]--;
+            if (special) return true;
+            return ds.some((d) => !d.sets.some((s) => s.kind === 'trip' && s.type === t));
+          })) continue;
         }
       }
       out.push({ kind: 'ankan', tile: t });
@@ -3732,7 +3748,7 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
 (function () {
   const MJ = (globalThis.MJ = globalThis.MJ || {});
   const T = MJ.tiles;
-  const F = (MJ.features = { version: 'obs-v1' });
+  const F = (MJ.features = { version: 'obs-v2' });
   const countIds = (ids) => {
     const c = new Array(34).fill(0);
     for (const id of ids || []) c[id >> 2]++;
@@ -3821,6 +3837,7 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
     const seat = obs.seat;
     // Score and riichi slots follow the match's starting seat order (0 = 起家),
     // not absolute seat numbers. startDealer defaults to 0 for older records.
+    // This is the obs-v2 slot meaning; obs-v1 used absolute seat order.
     const startDealer = Number.isInteger(obs.startDealer) ? obs.startDealer : 0;
     const seatAt = (slot) => (startDealer + slot) % 4;
     const values = [];
@@ -3951,11 +3968,17 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
       x: Array.from(s.x.data), label: s.label, meta: s.meta })).join('\n') + '\n';
   };
   F.fromJSONL = function (text) {
-    return String(text).split(/\r?\n/).filter(Boolean).map((line) => {
+    const lines = String(text).split(/\r?\n/).filter(Boolean);
+    let legacy = 0;
+    const legacyVersions = new Set();
+    const rows = lines.map((line) => {
       const row = JSON.parse(line);
+      if (row.v !== F.version) { legacy++; legacyVersions.add(row.v || 'missing'); }
       return { hand: row.hand, eventIndex: row.event, seat: row.seat, label: row.label, meta: row.meta,
         x: { version: row.v, channelNames: row.channels, globalNames: row.globals, shape: row.shape, data: Float32Array.from(row.x) } };
     });
+    if (legacy) console.warn(`features.fromJSONL: ${legacy}/${lines.length} rows use ${[...legacyVersions].join(', ')} (expected ${F.version}); regenerate old shards before training.`);
+    return rows;
   };
 })();
 
