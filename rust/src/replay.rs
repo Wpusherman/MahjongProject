@@ -240,7 +240,12 @@ impl GameState {
         if !tiles::valid_wall(&wall) {
             return Err(format!("seed {}: invalid wall", golden.seed));
         }
-        let dealer = golden.config.dealer.or(golden.config.start_dealer).unwrap_or(0) & 3;
+        let dealer = golden
+            .config
+            .dealer
+            .or(golden.config.start_dealer)
+            .unwrap_or(0)
+            & 3;
         if let Some(start) = golden.config.start_dealer {
             if start > 3 {
                 return Err(format!("seed {}: invalid startDealer", golden.seed));
@@ -332,8 +337,8 @@ impl GameState {
         self.sync_dora();
 
         if let Some(expected) = &self.initial_hands {
-            for seat in 0..4 {
-                if expected.get(seat) != Some(&self.players[seat].hand) {
+            for (seat, player) in self.players.iter().enumerate() {
+                if expected.get(seat) != Some(&player.hand) {
                     return Err(format!(
                         "seat {seat}: dealt hand does not match recorded initialHands"
                     ));
@@ -343,10 +348,7 @@ impl GameState {
 
         let scores: Vec<i64> = self.start_scores.to_vec();
         let dora = self.dora_indicators.clone();
-        self.record(
-            "start",
-            json!({"scores": scores, "doraIndicators": dora}),
-        );
+        self.record("start", json!({"scores": scores, "doraIndicators": dora}));
         Ok(())
     }
 
@@ -585,7 +587,10 @@ impl GameState {
         }
         let melds = self.players[seat].melds.clone();
         let action = json!({"kind": kan.kind, "tile": kan.tile});
-        self.record("kan", json!({"seat": seat, "action": action, "melds": melds}));
+        self.record(
+            "kan",
+            json!({"seat": seat, "action": action, "melds": melds}),
+        );
         Ok(())
     }
 
@@ -604,7 +609,7 @@ impl GameState {
 
     fn peek_is(&self, kind: &str, seat: usize) -> bool {
         self.peek()
-            .map_or(false, |d| d.kind == kind && d.seat as usize == seat)
+            .is_some_and(|d| d.kind == kind && d.seat as usize == seat)
     }
 
     fn take_pair(&mut self) -> Result<(Decision, Action), String> {
@@ -628,15 +633,15 @@ impl GameState {
             let seat = ((from as usize + dist) % 4) as u8;
             let asked = self
                 .peek()
-                .map_or(false, |d| d.kind == "call" && d.seat == seat);
+                .is_some_and(|d| d.kind == "call" && d.seat == seat);
             if !asked {
                 continue;
             }
             let (decision, action) = self.take_pair()?;
             let opts = options_from_decision(&decision, tile_id, from);
             let ron_offered = opts.get("ron").and_then(Value::as_bool).unwrap_or(false);
-            let pon_offered = !opts.get("pon").map_or(true, Value::is_null);
-            let kan_offered = !opts.get("kan").map_or(true, Value::is_null);
+            let pon_offered = opts.get("pon").is_some_and(|v| !v.is_null());
+            let kan_offered = opts.get("kan").is_some_and(|v| !v.is_null());
             let chi_legal = action
                 .tiles
                 .as_ref()
@@ -644,7 +649,7 @@ impl GameState {
                     let want = json!(pair);
                     opts.get("chi")
                         .and_then(Value::as_array)
-                        .map_or(false, |list| list.contains(&want))
+                        .is_some_and(|list| list.contains(&want))
                 })
                 .unwrap_or(false);
             let action_now = normalized_call_action(&action);
@@ -679,13 +684,12 @@ impl GameState {
                     _ => false,
                 };
                 if !valid {
-                    return Err(format!("illegal call response: seat {seat} {:?}", action.kind));
+                    return Err(format!(
+                        "illegal call response: seat {seat} {:?}",
+                        action.kind
+                    ));
                 }
-                claims.push(Claim {
-                    seat,
-                    action,
-                    dist,
-                });
+                claims.push(Claim { seat, action, dist });
             }
         }
         claims.sort_by(|a, b| {
@@ -765,13 +769,13 @@ impl GameState {
             }
             let n = tenpai.len() as i64;
             if n > 0 && n < 4 {
-                for seat in 0..4usize {
+                for (seat, player) in self.players.iter_mut().enumerate() {
                     let delta = if tenpai.contains(&(seat as u8)) {
                         3000 / n
                     } else {
                         -(3000 / (4 - n))
                     };
-                    self.players[seat].score += delta;
+                    player.score += delta;
                 }
             }
         }

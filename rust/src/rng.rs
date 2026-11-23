@@ -6,7 +6,7 @@
 
 use serde_json::Value;
 
-use crate::tiles::{WALL_SIZE};
+use crate::tiles::WALL_SIZE;
 
 /// mulberry32 state. The algorithm works on 32-bit wrapping arithmetic, which
 /// is identical to the signed `| 0` / `Math.imul` steps in JS once truncated.
@@ -23,9 +23,7 @@ impl Mulberry32 {
     pub fn next_f64(&mut self) -> f64 {
         self.state = self.state.wrapping_add(0x6d2b_79f5);
         let mut t = (self.state ^ (self.state >> 15)).wrapping_mul(1 | self.state);
-        t = t
-            .wrapping_add((t ^ (t >> 7)).wrapping_mul(61 | t))
-            ^ t;
+        t = t.wrapping_add((t ^ (t >> 7)).wrapping_mul(61 | t)) ^ t;
         ((t ^ (t >> 14)) as f64) / 4_294_967_296.0
     }
 }

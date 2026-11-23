@@ -1,7 +1,12 @@
 const { chromium } = require('@playwright/test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
+
+// The screenshots below are written to test-results/, which is gitignored and
+// therefore absent in a clean CI checkout.
+fs.mkdirSync(path.resolve(__dirname, '../test-results'), { recursive: true });
 
 // --fast is the smoke subset used by `npm test`: initial render, hidden-hand
 // masking, river layout and responsive width. `npm run test:full` plays a full
