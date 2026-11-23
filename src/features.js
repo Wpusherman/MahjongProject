@@ -88,9 +88,13 @@
   function globals(obs) {
     const scores = obs.scores || [25000, 25000, 25000, 25000];
     const seat = obs.seat;
+    // Score and riichi slots follow the match's starting seat order (0 = 起家),
+    // not absolute seat numbers. startDealer defaults to 0 for older records.
+    const startDealer = Number.isInteger(obs.startDealer) ? obs.startDealer : 0;
+    const seatAt = (slot) => (startDealer + slot) % 4;
     const values = [];
-    for (let s = 0; s < 4; s++) values.push((scores[s] - 25000) / 100000);
-    for (let s = 0; s < 4; s++) values.push((scores[seat] - scores[s]) / 100000);
+    for (let slot = 0; slot < 4; slot++) values.push((scores[seatAt(slot)] - 25000) / 100000);
+    for (let slot = 0; slot < 4; slot++) values.push((scores[seat] - scores[seatAt(slot)]) / 100000);
     const wind = obs.seatWind != null ? obs.seatWind : (obs.seatWinds || [27, 28, 29, 30])[seat];
     for (let w = 0; w < 4; w++) values.push(wind === 27 + w ? 1 : 0);
     values.push(obs.isDealer ? 1 : 0);
@@ -101,7 +105,7 @@
     const riichi = [0, 0, 0, 0];
     if (obs.riichi) riichi[seat] = 1;
     for (const o of obs.opponents || []) if (o.riichi) riichi[o.seat] = 1;
-    for (let s = 0; s < 4; s++) values.push(riichi[s]);
+    for (let slot = 0; slot < 4; slot++) values.push(riichi[seatAt(slot)]);
     values.push(obs.threat ? 1 : 0, obs.furiten ? 1 : 0);
     for (let i = 0; i < 3; i++) {
       const o = (obs.opponents || []).find((x) => x.seat === (seat + i + 1) % 4);
@@ -141,11 +145,17 @@
 
   // Deterministic supervised samples from a 翠卓 record. The observation is taken
   // immediately before the action, so opponent hands and the wall are never encoded.
+  // External mjlog conversions record calls as `call` events and do not contain
+  // `response` events for the seats that passed. For those records the call/pass
+  // decisions are reconstructed from the legal options and the next recorded event.
   F.dataset = function (record, opts = {}) {
     if (!record || !Array.isArray(record.hands)) throw new Error('features.dataset requires a 翠卓 record');
     const samples = [], limit = Number.isFinite(opts.limit) ? opts.limit : Infinity;
+    const synthesize = opts.syntheticCalls !== false;
+    const match = record.matchId || record.source || record.createdAt || 'match';
     for (let h = 0; h < record.hands.length; h++) {
       const hand = record.hands[h];
+      const hasResponses = hand.events.some((e) => e.type === 'response');
       for (let i = 0; i < hand.events.length; i++) {
         const event = hand.events[i];
         if (event.type === 'end' && event.result && event.result.type === 'win' && event.result.tsumo) {
@@ -154,7 +164,7 @@
           const obs = game.getObservation(seat);
           obs.furiten = game.isFuriten(seat);
           samples.push({ hand: h, eventIndex: i, seat, x: F.encode(obs),
-            label: { kind: 'tsumo', tile: event.result.winTile >> 2 },
+            label: { kind: 'tsumo', tile: event.result.winTile >> 2 }, match,
             meta: { version: F.version, hand: h, eventIndex: i, seat, turn: event.turn == null ? game.turnCount : event.turn, kind: 'end', riichi: !!game.players[seat].riichi } });
           if (samples.length >= limit) return samples;
           continue;
@@ -169,18 +179,43 @@
         obs.furiten = game.isFuriten(seat);
         const x = F.encode(obs);
         const label = labelOf(event, event.options);
-        if (event.type === 'discard') label.forced = !!game.players[seat].riichi;
-        samples.push({ hand: h, eventIndex: i, seat, x, label,
+        if (event.type === 'discard') { label.forced = !!game.players[seat].riichi; label.canRiichi = game.canRiichi(seat); }
+        samples.push({ hand: h, eventIndex: i, seat, x, label, match,
           meta: { version: F.version, hand: h, eventIndex: i, seat, turn: event.turn == null ? game.turnCount : event.turn,
             kind: event.type, riichi: !!game.players[seat].riichi } });
         if (samples.length >= limit) return samples;
+        if (event.type === 'discard' && synthesize && !hasResponses) {
+          const after = MJ.record.snapshot(hand, i);
+          const next = hand.events[i + 1];
+          const called = next && next.type === 'call' && next.from === seat ? next : null;
+          const ronned = next && next.type === 'end' && next.result && next.result.type === 'win' &&
+            !next.result.tsumo && next.result.loser === seat ? next : null;
+          for (let dist = 1; dist < 4; dist++) {
+            const caller = (seat + dist) % 4;
+            const options = after.callOptions(caller, seat, event.tileId);
+            if (!options) continue;
+            const action = called && called.seat === caller ? called.action
+              : ronned && ronned.result.winner === caller ? { type: 'ron' } : null;
+            const callObs = after.getObservation(caller, { callTile: event.tileId, callType: event.tileId >> 2,
+              callFrom: seat, isCallDecision: true, win: options.ron ? options.win : undefined });
+            callObs.furiten = after.isFuriten(caller);
+            const callLabel = action ? (action.type === 'ron' ? { kind: 'ron' }
+              : action.type === 'chi' ? { kind: 'chi', tile: event.tileId >> 2, tiles: action.tiles.slice() }
+                : { kind: action.type, tile: event.tileId >> 2 }) : { kind: 'pass' };
+            samples.push({ hand: h, eventIndex: i, seat: caller, x: F.encode(callObs), label: callLabel, match,
+              meta: { version: F.version, hand: h, eventIndex: i, seat: caller, turn: event.turn == null ? after.turnCount : event.turn,
+                kind: 'response', riichi: !!after.players[caller].riichi, synthetic: true, ron: !!options.ron,
+                pon: options.pon != null, kan: options.kan != null, chi: (options.chi || []).length } });
+            if (samples.length >= limit) return samples;
+          }
+        }
       }
     }
     return samples;
   };
 
   F.toJSONL = function (samples) {
-    return samples.map((s) => JSON.stringify({ v: s.x.version, hand: s.hand, event: s.eventIndex, seat: s.seat,
+    return samples.map((s) => JSON.stringify({ v: s.x.version, match: s.match, hand: s.hand, event: s.eventIndex, seat: s.seat,
       channels: s.x.channelNames, globals: s.x.globalNames, shape: s.x.shape,
       x: Array.from(s.x.data), label: s.label, meta: s.meta })).join('\n') + '\n';
   };

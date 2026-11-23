@@ -29,6 +29,7 @@ input[type=checkbox] { accent-color:var(--gold); } .hidden { display:none!import
 .seat-head .score { margin-left:10px; font:600 21px 'Consolas',monospace; color:#f0ede0; }
 .seat.active .seat-head { border-color:#d7b67a; box-shadow:0 0 16px #d7b67a15; }
 .wind { color:var(--gold); font-weight:bold; font-size:17px; } .riichi-flag { color:#ffb3a5; font-size:11px; }
+.dealer-mark { color:#0f2422; background:#d7b67a; border-radius:3px; padding:0 5px; font-size:10px; font-weight:700; letter-spacing:1px; }
 .hand-row { display:flex; align-items:flex-end; justify-content:center; gap:2px; --tile-w:39px; --tile-h:54px; min-height:55px; }
 .seat-bottom .hand-row { --tile-w:42px; --tile-h:59px; }
 .hand-row .drawn { margin-right:14px; } .melds-row { display:flex; gap:9px; position:absolute; top:93px; right:0; }

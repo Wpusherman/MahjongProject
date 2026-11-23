@@ -6,7 +6,7 @@
 
 1. 東風戦または半荘戦と、対戦AI「思考型／標準」を選びます。
 2. 自分の手番で手牌をクリックして打牌します。ツモ牌は自分から見て左端です。
-3. リーチボタンを押すと、宣言できる打牌だけが選択可能になります。鳴き・和了は表示されたボタンで操作します。リーチ後は自動ツモ切りになり、ツモ・ロンは引き続き手動で選択します。人間のリーチ後の暗槓は自動で見送ります。
+3. リーチボタンを押すと、宣言できる打牌だけが選択可能になります。鳴き・和了は表示されたボタンで操作します。リーチ後は自動ツモ切りになり、ツモ・ロンは引き続き手動で選択します。待ちが変わらない暗槓ができるときは、自動ツモ切りの前に「槓／ツモ切り」を選べます（`rules.riichiAnkan`）。
 4. 「高速進行」でCOMの待ち時間を短縮できます。「AIのヒント」は推奨牌と受入を表示します。
 
 ### 表示
@@ -31,6 +31,8 @@
 - 九種九牌・流し満貫・包は採用していません。三麻はありません。
 - 数え役満あり、切り上げ満貫なし。役満は複合加算。大四喜・四暗刻単騎ロンはダブル役満です。国士十三面・純正九蓮・四暗刻単騎ツモはシングル扱いです。
 - 槓ドラ即乗り。最大4槓。嶺上牌4枚、ドラ／裏ドラ表示各5枚は重複のない14枚の王牌に割り当てています。嶺上ツモごとに生牌山の末尾を王牌へ補充します。
+- リーチ後の暗槓は `rules.riichiAnkan` で切り替えます。`wait`（既定・天鳳準拠）は槓の前後で待ち牌の集合が完全に一致する場合のみ、`strict` はさらに全和了分解でその牌が刻子になる場合のみ、`none` は不可です。対象はツモ牌が4枚目になる暗槓だけで、手牌の4枚目を使う送り槓は認めません。槓後は嶺上ツモ → 槓ドラ → 自動ツモ切りに戻ります。
+- 起家は対局シードから決定的に選ばれます（`rules.startDealer: "random"`、テスト・golden用に 0〜3 で固定可）。起家決めは牌山の乱数とは別系列なので、同じシードの牌山は変わりません。局表示・自風・同点時の順位は起家から見た席順で決まります。
 - 暗槓は牌種だけを公開し、外側2枚の伏せ牌に赤5があっても赤かどうかは公開しません（内側の公開牌にある赤はそのまま見えます）。他家の手牌は枚数のみ、裏ドラ・牌山・他家の手牌IDは観測ビューに含めません。
 - 対局中の牌譜（localStorageへの自動保存・途中書き出し）はマスクされます。牌山・他家の配牌/ツモ・他家の鳴き候補・他家AIの解析は含まれず、終局後に保存した牌譜だけが全情報を含みます。`MJ.ui.record` も対局中はマスク済みのコピーを返します。
 - 他家の応答チェックは、鳴ける・ロンできる場合もできない場合も同じ固定待ち時間で行います。待ち時間の差から他家の手牌を推測できないようにしています。
@@ -89,7 +91,7 @@ while (!core.is_terminal()) {
 const result = core.final_result();
 ```
 
-- `new_game(config, seed)` / `new_game` は牌山をシードから生成し、最初の意思決定まで進めて返します。`create(config, seed)` は未開始のCoreを返します。
+- `new_game(config, seed)` / `new_game` は牌山をシードから生成し、最初の意思決定まで進めて返します。`create(config, seed)` は未開始のCoreを返します。`config.dealer` を省略すると `config.rules.startDealer`（`"random"` または 0〜3）から起家を決めます。観測ビューには `startDealer`・`seatOrder`（起家からの相対位置）・`roundNumber` が入ります。
 - `observe(seat)` は `game.getObservation(seat)` と同じ公開情報ビューです。他家の手牌ID・牌山・王牌・裏ドラは含みません。
 - `legal_actions(seat)` は現在の意思決定に対する合法手を返します。打牌（リーチ有無）、ツモ/見送り、槓、ロン/ポン/チー/大明槓/見送りを含みます。
 - `step(action)` は合法手を検証して状態を進め、発生したイベントを返します。不正な手は状態を変えずに例外になります。
@@ -185,6 +187,18 @@ node tools/evaluate.js --seeds 20 --workers 8 --match tonpu --grp models/grp.jso
 - 学習データは天鳳mjlogを `tools/mjai-convert.js` で変換した翠卓JSON、または翠卓の自己対戦JSONです。天鳳は30000点返し（オカ20）を `record.mjai.tenhou` に記録します。牌譜データ自体は同梱しません。
 - `--candidate-grp` / `--baseline-grp` で片側だけGRPにできます。`--start-states` と組み合わせると、南3〜南4の実戦に近い開始状態で **GRP版rankBiasと既存rankBiasを直接比較**できます。
 - 自己対戦200試合（4,724サンプル、試合単位8:2分割、match重複0・重複サンプル0）の実測は top-1 0.444（点数順 0.434）、期待順位点 MAE 54.02（60.98）、行列の最大行・列誤差 4.4e-16。**東1局の top-1 は0.279**（閾値0.35未満）です。以前の 0.891 は自己対戦生成で毎局同じ牌山を使っていたアーティファクトで、修正済みです。全体では点数順をわずかに上回るものの、東4では負けており、自己対戦由来の限界があります。南3〜4はサンプルが少なく不安定です。詳細は [docs/grp.md](docs/grp.md)。
+- **天鳳実データ（鳳凰卓）で再学習**: `tools/tenhou-fetch.js` で取得した143件からstrict変換した118試合・4,812サンプル（試合単位8:2、学習3,820 / 検証992、重複0）。検証 top-1 0.4435、4×4ジョイント top-1 0.4637（点数順0.4899）、期待順位点MAE **54.10（点数順55.07）**、行列誤差4.4e-16、ONNX差4.3e-08。局別top-1は東1 **0.298**（正常範囲0.25〜0.30）/ 東2 0.288 / 東3 0.308 / 東4 0.394で、自己対戦の0.279/0.412/0.471/0.547より南場が平坦です。実データでは順位予測に和了やめ・押し引き・相手力量など特徴量外の情報が必要で、全体top-1は点数順に負けますがMAEは改善します。
+
+### 教師あり方策ネット（2026-11-23）
+
+天鳳鳳凰卓の牌譜から、obs-v1（25×34 + 31）を入力とするResNet方策ネットを学習できます。
+
+- 取得: `node tools/tenhou-fetch.js --hours 6 --logs 240 --out data/tenhou`。鳳凰卓（四鳳・赤・喰いタン）の牌譜IDを時間別インデックスから拾い、`tenhou.net/0/log/?<id>` を保存します。**牌譜データは `data/`（gitignore）に置き、コミットしません。**
+- 変換: `node tools/tenhou-pipeline.js data/tenhou --out-features ... --out-report ...`。strictでルール差を除外し、失敗率・除外理由・判断数をレポートします。今回の143件では118件成功・25件除外・失敗0、1,203局・58,458判断（打牌58,026・ツモ432）でした。
+- 方策データ: `node tools/policy-dataset.js data/tenhou --out test-results/policy-tenhou.jsonl`。Tenhouには `response` がないため、各打牌後の合法手と次のイベントから鳴き/ロン/見送りを再構成します。73,839サンプル（打牌58,026・見送り12,445・ポン1,385・チー947・ロン600・ツモ432・カン4、リーチ陽性878）。
+- 学習: `python tools/policy/train_policy.py --data test-results/policy-tenhou.jsonl --out-dir test-results/policy-model-tenhou --width 128 --blocks 10 --epochs 2 --max-discard 20000`。試合単位でtrain/valを分け、打牌34・リーチ2・鳴き5・和了2の4ヘッドを同時学習します。クラス重みは学習時のみ使い、推論時に `log p = log softmax − log w` で補正します。
+- 推論: `policy.onnx` を `onnxruntime-node` で実行。`src/policy.js` の `MJ.policy.predictBatch` がバッチ推論、`--candidate-policy FILE` がduplicate評価への接続です。ONNXセッションはワーカー間でcloneできないため、各ワーカーがファイルから1回ロードします。`node tools/policy-bench.js --model <onnx> --samples 1024` でバッチ1/8/32/128の推論速度を記録できます（実測 235/307/327/376 samples/s、CPU）。試合はターン逐次なのでin-gameはbatch=1です。
+- 指標は判断種別ごと（打牌top-1、リーチ一致率、鳴き5クラスの混同行列、和了）に出します。**小規模データのため、既存AIに対する強さの主張は別途duplicate評価が必要です。** 実測（118試合・73,839サンプル）: 10ブロック/128chは打牌top-1 43.8%・リーチ55.4%・鳴き53.5%、duplicate **−7.31点（95% CI −12.85〜−1.77）**。小型4ブロック/64chは打牌49.4%・duplicate **−6.19点（95% CI −11.88〜−0.50）**。現段階ではパラメータ数よりデータ量が律速で、既存ヒューリスティックに負けます。詳細は [AI_REVIEW.md](AI_REVIEW.md)。
 
 ### 評価（duplicate自己対戦）
 
@@ -213,6 +227,7 @@ node tools/evaluate.js --seeds 500 --workers 8 --level fast --out fast.json
 - 95%信頼区間は正規近似です。rotateでは「1シード＝4局のクラスタ」を1標本として数え、4席を独立標本にはしません。`--candidate-seat seed` は1シード1標本です。
 - 新しいモデルの採用は、ペア差またはクラスタ差のCIが0をまたがないことを条件にするのが安全です。短い評価は牌山への過適合を含みます。
 - 2026-11-22の開始状態モード（南3〜4の自己対戦54状態、fast、`--candidate-seat seed --control`、500シード）: rankBiasあり−なしのペア差は **+0.27点（95% CI −0.26〜+0.80）** で「改善未確認」。クラスタsd 79.9のため0.2点検出には約61万シードが必要という試算です。同点開始の旧計測（standard、1000シード）は **+0.18点（95% CI −0.17〜+0.53）**、raw 200シードは0.00（設計上）。GRP版rankBiasと既存の比較は [docs/grp.md](docs/grp.md)。
+- **2026-11-23 順位点EV版**: 押し引き・リーチ・鳴き・和了見逃しで「和了時/放銃時/流局時の期待順位点」を直接比較する経路を追加しました（`rankOrder` / `rankRiichiEnabled` / `rankCallEnabled` / `rankCallMargin`、最終局は `finalResult` の決定的順位点）。**既定は和了見逃しのみ**です。天鳳実データ由来の南3〜4開始状態312件・200シード・`--control` で、既定は **0.00点（95% CI −0.16〜+0.16、分岐0.4%）**、フルrank EVは **−3.04点（95% CI −5.05〜−1.03、分岐19.4%）** と悪化しました。鳴き42%・リーチ12%（基準は13.8%・29.0%）に偏るためで、フルrank EVは `test-results/weights/full.json` の実験用オプトインに留めます。詳細と分岐10例は [AI_REVIEW.md](AI_REVIEW.md)。
 
 ### 高速化（2026-11-22）
 
@@ -224,6 +239,7 @@ node tools/evaluate.js --seeds 500 --workers 8 --level fast --out fast.json
   node tools/bench-throughput.js --seeds 128 --warmup 8 --workers 4
   ```
   標準設定は **65.6 games/s**、`--level fast`（根12）は **66.8 games/s**（同一policyのduplicate）。128シードの起動込みでも63.2 games/s、ウォームアップ区間は52.6 games/sでした。16シードだと定常推定が57.6 games/s、起動込み47.3 games/sとぶれます。**16局と128局の差（42.5 vs 56.2）は、ワーカー起動・モジュール読込・向聴/形キャッシュとJITのウォームアップ**が主因で、定常値そのものはほぼ同じです。比較には128シード以上を使ってください。
+- **2026-11-23の再プロファイル**: `node --cpu-prof tools/profile-run.js {fast|standard} 6` で24局を計測。fast/standardとも **2.06秒** で差は再現せず、CPU self timeの上位は `finish`（評価器）8.3/10.9%、`agari.decompose` 6.7/6.9%、観測生成5.6/4.7%、`Game.waits` 4.4/5.1%、`evaluate` 4.4/5.2%、向聴の`groupOptions`/`combineGroups` 7.8/6.0%、`Game.discard` 4.1/3.9%、`clone`+`record` 7.2/6.6%でした。律速は根候補数ではなく **評価器・和了分解・観測生成・フリテン/待ち・向聴・記録clone** の共通処理です。**fastは互換・小規模比較用に残しますが、速度レバーではありません**。集計は `tools/profile-cpu.js`、結果は `test-results/profile-fast.json` / `profile-standard.json`。
 - 旧8.5 games/s（16局、起動込み）→ 同じ16局コマンドで38.6–42.5 games/s（4.5–5.0倍）、定常65.6 games/s。fast（根12）は標準との打牌一致率98.6%、`--root-candidates 5` はさらに速いが一致率51%です。
 - 数値は `test-results/bench-steady-128.json` / `bench-steady-fast-128.json` / `bench-steady-16.json` / `divergence-k12.json` に保存しています。CPU・ワーカー数・シード数で変動します。
 
@@ -290,7 +306,7 @@ rustup を入れられない環境では Docker でも同じ検査ができま�
 docker run --rm -v "$PWD/rust:/app" -w /app rust:latest   bash -lc "rustup component add rustfmt clippy && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test"
 ```
 
-`rust/Cargo.lock` は再現性のためコミットします。`rust/tests/golden/shanten.json` は、新テーブル実装と旧DFSの等価性を `SHANTEN_CASES=100000 node test/shanten.test.js`（10万件、副露あり、不一致0）で確認した**後**のJS実装から生成した5,000手の golden です。向聴・和了判定の一致を検査します。ゲーム進行のイベント列リプレイは未実装です。
+`rust/Cargo.lock` は再現性のためコミットします。`rust/tests/golden/shanten.json` は、新テーブル実装と旧DFSの等価性を `SHANTEN_CASES=100000 node test/shanten.test.js`（10万件、副露あり、不一致0）で確認した**後**のJS実装から生成した5,000手の golden です。向聴・和了判定の一致を検査します。**ゲーム進行のイベント列リプレイは実装済み**です。`test/golden/core-*.json` は `decisions`（席・種別・合法手）・`wall`・`initialHands` を含み、`rust/tests/replay.rs` が4ファイル合計497イベントの完全一致を確認します（`cargo test`）。役・点数ペイロードは既存の向聴/和了/点数goldenで担保し、リプレイでは進行identityを比較します。PyO3は既定offの `python` featureで `replay_golden(json) -> str` を公開する骨組みまで用意しています。
 
 `index.html` が開発用、`mahjong.html` がフォント・CSS・JSを埋め込んだ配布用です。
 
@@ -313,12 +329,12 @@ node train.js --eval weights.json --hands 240
 
 ## 未着手・今後の作業
 
-- Rust coreは `tiles`・`shanten`（標準形／七対子／国士）・`agari`・基本`score` まで実装しました。JSが生成した5,000手のgolden（`rust/tests/golden/shanten.json`）と一致することをCIで確認します。**ゲーム進行のイベント列リプレイは未実装**です。`rust/tests/golden.rs` は現時点でgolden JSONの形式検査と向聴・和了判定の一致までを行います。
-- 天鳳一括パイプラインは実装済みですが、1万半荘規模の実データは同梱していません。変換失敗率・除外率は各自のデータで `--out-report` を確認してください。
-- 教師あり方策（ResNet系の打牌／リーチ／鳴きヘッド）、ONNX → `onnxruntime-web` の学習型COM、UI選択は未着手です。`features` と Parquet の入出力、比較用の評価基盤は用意済みです。
+- Rust coreは `tiles`・`shanten`（標準形／七対子／国士）・`agari`・基本`score` に加え、**golden操作列のイベント列リプレイ**とRNG/牌山再現を実装しました。`cargo test` で向聴・和了判定の5,000手goldenと、4ファイル497イベントの完全一致を確認します。PyO3バインディングはfeature-gatedの骨組みまでです。次はゲームループ全体のRust移植と自己対戦エンジンの移設です。
+- 天鳳一括パイプラインと取得ツール（`tools/tenhou-fetch.js`）を実装しました。1万半荘規模の実データは同梱していません。変換失敗率・除外率は各自のデータで `--out-report` を確認してください。
+- 教師あり方策（ResNet打牌／リーチ／鳴き／和了ヘッド）、ONNX → `onnxruntime-node` の学習型COM、`--candidate-policy` によるduplicate比較まで実装しました。データ規模が小さいため、強さの主張には追加の天鳳牌譜とduplicate評価が必要です。ブラウザー向け `onnxruntime-web` のUI選択は未着手です。
 - GRPのブラウザー推論（`onnxruntime-web`）は未着手です。`grp.json` の推論器はJavaScriptで動作します。
 - 自己対戦強化学習（PPO＋相手プール）、雀魂牌譜の直接変換は未着手です（雀魂は利用規約の確認後、優先度低）。
-- `--level fast` は根12で標準とほぼ一致しますが、`--root-candidates` を下げるほど打牌一致率が落ちます。大規模比較の前に `tools/divergence.js` で一致率を確認してください。
+- `--level fast` は根12で標準とほぼ一致しますが、2026-11-23の再プロファイルでは標準との速度差がありませんでした（24局とも2.06秒）。fastは互換・小規模比較用に残し、高速化は評価器・観測生成・向聴・記録cloneの共通ホットスポットで行います。
 
 ### フォント
 

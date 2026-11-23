@@ -25,13 +25,21 @@
   const pass = () => ({ type: 'pass' });
   const isPass = (action) => action == null || action === false || (typeof action === 'object' && action.type === 'pass');
 
-  function normalizeConfig(config) {
-    return Object.assign({ roundWind: 27, dealer: 0, honba: 0, riichiSticks: 0,
-      scores: [25000, 25000, 25000, 25000] }, config || {});
+  function normalizeConfig(config, seed) {
+    const settings = config || {};
+    // Resolve the match's East-1 dealer separately from the wall RNG. An
+    // explicit `dealer` (tests/goldens) always wins; otherwise the rule switch
+    // decides, and a missing dealer is the first hand's East-1 dealer.
+    const seating = MJ.rules.resolveSeating(settings, seed);
+    return Object.assign({ roundWind: 27, honba: 0, riichiSticks: 0,
+      scores: [25000, 25000, 25000, 25000] }, settings,
+      { rules: seating.rules, startDealer: seating.startDealer, dealer: seating.dealer,
+        hand: Number.isInteger(settings.hand) ? settings.hand : Number.isInteger(settings.handIndex) ? settings.handIndex : 0,
+        seed });
   }
 
   function Core(config, seed) {
-    this.config = normalizeConfig(config);
+    this.config = normalizeConfig(config, seed);
     this.seed = seed;
     this.rng = C.rng(seed);
     this.wall = this.config.wall ? this.config.wall.slice() : T.buildWall(this.rng);
@@ -90,6 +98,10 @@
         return core._deferred();
       },
       wantKan(view, kans) {
+        // The game always performs the kan check for a riichi seat (even with an
+        // empty list) so timing does not reveal hidden options; an empty check is
+        // not a decision.
+        if (!kans || !kans.length) return Promise.resolve(null);
         core._pend(seat, 'kan', view, kanActions(kans));
         return core._deferred();
       }

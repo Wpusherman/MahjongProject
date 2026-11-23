@@ -3,6 +3,7 @@
   "config": {
     "roundWind": 27,
     "dealer": 2,
+    "startDealer": 0,
     "honba": 0,
     "riichiSticks": 0,
     "scores": [
@@ -10,9 +11,4969 @@
       25000,
       25000,
       25000
-    ]
+    ],
+    "rules": {
+      "riichiAnkan": "wait",
+      "startDealer": 0
+    }
   },
+  "wall": [
+    61,
+    90,
+    44,
+    89,
+    45,
+    118,
+    34,
+    128,
+    78,
+    122,
+    119,
+    30,
+    117,
+    26,
+    84,
+    22,
+    130,
+    101,
+    93,
+    16,
+    124,
+    33,
+    13,
+    48,
+    35,
+    55,
+    31,
+    120,
+    110,
+    132,
+    127,
+    40,
+    87,
+    76,
+    75,
+    74,
+    60,
+    91,
+    97,
+    28,
+    3,
+    10,
+    50,
+    20,
+    83,
+    47,
+    19,
+    57,
+    86,
+    8,
+    63,
+    113,
+    108,
+    73,
+    94,
+    15,
+    11,
+    54,
+    42,
+    37,
+    39,
+    12,
+    27,
+    58,
+    56,
+    123,
+    29,
+    112,
+    65,
+    1,
+    107,
+    32,
+    67,
+    77,
+    23,
+    98,
+    129,
+    66,
+    2,
+    41,
+    51,
+    68,
+    85,
+    59,
+    125,
+    88,
+    133,
+    72,
+    81,
+    121,
+    116,
+    62,
+    18,
+    105,
+    92,
+    6,
+    95,
+    111,
+    79,
+    96,
+    103,
+    9,
+    53,
+    5,
+    36,
+    109,
+    24,
+    131,
+    69,
+    49,
+    104,
+    0,
+    21,
+    126,
+    7,
+    106,
+    4,
+    114,
+    134,
+    80,
+    17,
+    70,
+    102,
+    52,
+    25,
+    135,
+    14,
+    100,
+    46,
+    64,
+    82,
+    115,
+    71,
+    38,
+    43,
+    99
+  ],
+  "initialHands": [
+    [
+      3,
+      10,
+      20,
+      30,
+      31,
+      35,
+      50,
+      55,
+      63,
+      78,
+      119,
+      120,
+      122
+    ],
+    [
+      19,
+      22,
+      26,
+      40,
+      47,
+      57,
+      83,
+      84,
+      110,
+      113,
+      117,
+      127,
+      132
+    ],
+    [
+      16,
+      44,
+      61,
+      74,
+      75,
+      76,
+      86,
+      87,
+      89,
+      90,
+      93,
+      101,
+      130
+    ],
+    [
+      8,
+      13,
+      28,
+      33,
+      34,
+      45,
+      48,
+      60,
+      91,
+      97,
+      118,
+      124,
+      128
+    ]
+  ],
   "policy": "random",
+  "decisions": [
+    {
+      "seat": 2,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 16,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 44,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 61,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 74,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 75,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 76,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 86,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 87,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 89,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 90,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 93,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 101,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 130,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 108,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 3,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 8,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 13,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 28,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 33,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 34,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 45,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 48,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 60,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 91,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 97,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 118,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 124,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 128,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 73,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 0,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 3,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 10,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 20,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 30,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 31,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 35,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 50,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 55,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 63,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 78,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 119,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 120,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 122,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 94,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 1,
+      "type": "call",
+      "legal": [
+        {
+          "type": "chi",
+          "tile": 7,
+          "tiles": [
+            5,
+            6
+          ]
+        },
+        {
+          "type": "pass"
+        }
+      ]
+    },
+    {
+      "seat": 1,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 40,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 47,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 57,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 83,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 84,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 110,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 113,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 117,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 127,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 132,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 2,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 16,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 44,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 61,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 74,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 75,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 86,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 87,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 89,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 90,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 93,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 101,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 108,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 130,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 15,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 3,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 8,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 13,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 28,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 33,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 34,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 45,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 48,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 60,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 73,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 91,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 97,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 118,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 124,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 11,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 0,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 3,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 10,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 20,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 30,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 35,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 50,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 55,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 63,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 78,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 94,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 119,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 120,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 122,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 54,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 1,
+      "type": "call",
+      "legal": [
+        {
+          "type": "chi",
+          "tile": 19,
+          "tiles": [
+            20,
+            21
+          ]
+        },
+        {
+          "type": "pass"
+        }
+      ]
+    },
+    {
+      "seat": 1,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 19,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 40,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 47,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 57,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 113,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 117,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 127,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 132,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 2,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 15,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 16,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 44,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 61,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 74,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 75,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 86,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 87,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 89,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 93,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 101,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 108,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 130,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 42,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 3,
+      "type": "call",
+      "legal": [
+        {
+          "type": "chi",
+          "tile": 4,
+          "tiles": [
+            2,
+            3
+          ]
+        },
+        {
+          "type": "pass"
+        }
+      ]
+    },
+    {
+      "seat": 3,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 8,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 11,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 13,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 28,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 33,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 34,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 45,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 48,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 60,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 73,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 97,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 118,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 124,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 37,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 0,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 3,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 10,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 20,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 30,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 35,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 50,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 54,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 55,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 63,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 94,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 119,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 120,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 122,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 39,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 1,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 19,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 40,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 47,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 57,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 113,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 117,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 132,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 12,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 2,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 15,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 42,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 44,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 61,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 74,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 75,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 86,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 87,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 89,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 93,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 101,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 108,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 130,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 27,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 3,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 8,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 11,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 13,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 28,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 33,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 34,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 45,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 48,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 60,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 73,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 97,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 118,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 124,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 58,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 0,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 10,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 20,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 30,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 35,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 39,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 50,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 54,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 55,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 63,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 94,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 119,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 120,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 122,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 56,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 1,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 12,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 19,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 40,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 47,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 57,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 117,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 132,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 123,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 2,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 15,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 27,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 42,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 44,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 74,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 75,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 86,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 87,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 89,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 93,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 101,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 108,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 130,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 29,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 3,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 8,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 13,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 28,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 33,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 34,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 45,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 48,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 58,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 60,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 73,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 97,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 118,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 124,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 112,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 2,
+      "type": "call",
+      "legal": [
+        {
+          "type": "pon",
+          "tile": 18
+        },
+        {
+          "type": "pass"
+        }
+      ]
+    },
+    {
+      "seat": 0,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 10,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 20,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 30,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 35,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 39,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 50,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 54,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 56,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 63,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 94,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 119,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 120,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 122,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 65,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 1,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 12,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 19,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 40,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 57,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 117,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 123,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 132,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 1,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 2,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 15,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 27,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 29,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 42,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 44,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 74,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 75,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 86,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 87,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 89,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 93,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 108,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 130,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 107,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 3,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 8,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 13,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 28,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 33,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 34,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 45,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 48,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 58,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 60,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 97,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 112,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 118,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 124,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 32,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 0,
+      "type": "call",
+      "legal": [
+        {
+          "type": "chi",
+          "tile": 14,
+          "tiles": [
+            12,
+            13
+          ]
+        },
+        {
+          "type": "chi",
+          "tile": 14,
+          "tiles": [
+            13,
+            15
+          ]
+        },
+        {
+          "type": "chi",
+          "tile": 14,
+          "tiles": [
+            15,
+            16
+          ]
+        },
+        {
+          "type": "pass"
+        }
+      ]
+    },
+    {
+      "seat": 0,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 10,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 20,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 30,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 35,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 39,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 63,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 65,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 94,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 120,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 122,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 1,
+      "type": "call",
+      "legal": [
+        {
+          "type": "chi",
+          "tile": 2,
+          "tiles": [
+            3,
+            4
+          ]
+        },
+        {
+          "type": "pass"
+        }
+      ]
+    },
+    {
+      "seat": 1,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 1,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 12,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 19,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 40,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 57,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 123,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 132,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 67,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 2,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 15,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 27,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 29,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 42,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 44,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 74,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 75,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 86,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 87,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 89,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 93,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 107,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 130,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 77,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 3,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 8,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 13,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 28,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 32,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 33,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 34,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 45,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 48,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 60,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 97,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 112,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 118,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 124,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 23,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 0,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 20,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 30,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 35,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 39,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 56,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 63,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 65,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 94,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 120,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 122,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 98,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 1,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 1,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 12,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 19,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 40,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 67,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 123,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 132,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 129,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 2,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 15,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 27,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 29,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 42,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 44,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 75,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 77,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 86,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 87,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 89,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 93,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 107,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 130,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 66,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 3,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 13,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 23,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 28,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 32,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 33,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 34,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 45,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 48,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 60,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 97,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 112,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 118,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 124,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 2,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 0,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 20,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 30,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 35,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 39,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 56,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 63,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 65,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 98,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 120,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 122,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 41,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 3,
+      "type": "call",
+      "legal": [
+        {
+          "type": "pon",
+          "tile": 8
+        },
+        {
+          "type": "kan",
+          "tile": 8
+        },
+        {
+          "type": "pass"
+        }
+      ]
+    },
+    {
+      "seat": 3,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 13,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 23,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 28,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 45,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 48,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 60,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 97,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 112,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 118,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 124,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 102,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 0,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 20,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 30,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 39,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 41,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 56,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 63,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 65,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 98,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 120,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 122,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 51,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 1,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 1,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 12,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 19,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 40,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 67,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 123,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 132,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 68,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 2,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 15,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 27,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 29,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 42,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 44,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 66,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 75,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 77,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 86,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 87,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 89,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 93,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 107,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 85,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 3,
+      "type": "call",
+      "legal": [
+        {
+          "type": "chi",
+          "tile": 10,
+          "tiles": [
+            11,
+            12
+          ]
+        },
+        {
+          "type": "pass"
+        }
+      ]
+    },
+    {
+      "seat": 3,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 13,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 23,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 28,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 45,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 48,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 60,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 97,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 102,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 112,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 118,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 59,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 0,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 20,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 30,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 39,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 51,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 56,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 63,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 65,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 98,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 120,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 122,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 125,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 1,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 1,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 12,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 40,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 67,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 68,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 123,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 132,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 88,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 2,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 15,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 27,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 29,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 44,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 66,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 75,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 77,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 85,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 86,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 87,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 89,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 93,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 107,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 133,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 3,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 13,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 23,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 28,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 45,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 48,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 59,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 60,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 102,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 112,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 118,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 72,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 0,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 20,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 30,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 51,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 56,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 63,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 65,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 98,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 120,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 122,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 125,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 81,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 1,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 1,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 12,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 67,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 68,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 88,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 123,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 132,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 121,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 2,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 15,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 27,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 29,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 44,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 66,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 75,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 77,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 85,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 87,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 89,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 93,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 107,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 133,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 116,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 3,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 23,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 28,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 45,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 48,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 59,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 60,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 72,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 102,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 112,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 118,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 62,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 0,
+      "type": "call",
+      "legal": [
+        {
+          "type": "chi",
+          "tile": 15,
+          "tiles": [
+            14,
+            16
+          ]
+        },
+        {
+          "type": "pass"
+        }
+      ]
+    },
+    {
+      "seat": 0,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 20,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 30,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 51,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 81,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 120,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 122,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 125,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 1,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 1,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 12,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 67,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 68,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 88,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 121,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 123,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 18,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 2,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 15,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 27,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 29,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 44,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 66,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 77,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 85,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 87,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 89,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 93,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 107,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 116,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 133,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 105,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 3,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 23,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 28,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 45,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 48,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 59,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 62,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 72,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 102,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 112,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 118,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 92,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 0,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 20,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 30,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 51,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 63,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 81,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 120,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 122,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 6,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 1,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 1,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 18,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 67,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 68,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 88,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 121,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 123,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 95,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 2,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 15,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 27,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 29,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 44,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 66,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 77,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 85,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 87,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 89,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 93,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 105,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 116,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 133,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 111,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 3,
+      "type": "call",
+      "legal": [
+        {
+          "type": "chi",
+          "tile": 6,
+          "tiles": [
+            5,
+            7
+          ]
+        },
+        {
+          "type": "pass"
+        }
+      ]
+    },
+    {
+      "seat": 3,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 48,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 59,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 62,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 72,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 92,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 102,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 112,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 118,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 0,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 6,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 20,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 51,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 63,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 81,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 120,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 122,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 79,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 1,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 18,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 67,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 68,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 88,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 95,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 121,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 123,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 96,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 2,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 15,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 29,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 44,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 66,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 77,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 85,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 87,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 89,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 93,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 105,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 111,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 116,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 133,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 103,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 3,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 48,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 59,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 62,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 92,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 102,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 112,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 118,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 9,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 0,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 6,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 51,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 63,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 79,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 81,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 120,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 122,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 53,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 1,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 18,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 68,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 88,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 95,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 96,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 121,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 123,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 5,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 0,
+      "type": "call",
+      "legal": [
+        {
+          "type": "pon",
+          "tile": 30
+        },
+        {
+          "type": "pass"
+        }
+      ]
+    },
+    {
+      "seat": 2,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 15,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 29,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 44,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 66,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 77,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 85,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 89,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 93,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 103,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 105,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 111,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 116,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 133,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 36,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 3,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 9,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 48,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 59,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 62,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 92,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 112,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 118,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 109,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 0,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 51,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 53,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 63,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 79,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 81,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 120,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 122,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 24,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 1,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 5,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 18,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 68,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 88,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 95,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 96,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 121,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 131,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 2,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 15,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 29,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 36,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 44,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 66,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 77,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 89,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 93,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 103,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 105,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 111,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 116,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 133,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 69,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 3,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 9,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 59,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 62,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 92,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 109,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 112,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 118,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 49,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 0,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 24,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 53,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 63,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 79,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 81,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 120,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 122,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 104,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 1,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 5,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 68,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 88,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 95,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 96,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 121,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 131,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 0,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 0,
+      "type": "call",
+      "legal": [
+        {
+          "type": "pon",
+          "tile": 30
+        },
+        {
+          "type": "pass"
+        }
+      ]
+    },
+    {
+      "seat": 0,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 24,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 63,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 79,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 81,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 104,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 1,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 0,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 5,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 68,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 88,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 95,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 96,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 131,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 21,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 2,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 15,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 29,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 36,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 44,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 66,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 69,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 77,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 89,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 93,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 103,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 105,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 111,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 116,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 126,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 3,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 9,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 49,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 59,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 62,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 92,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 109,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 112,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 7,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 0,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 24,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 79,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 81,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 104,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 106,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 1,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 0,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 5,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 68,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 88,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 95,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 96,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 131,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 4,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 2,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 15,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 29,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 36,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 44,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 66,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 77,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 89,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 93,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 103,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 105,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 111,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 116,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 126,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 114,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 3,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 7,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 9,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 59,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 62,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 92,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 109,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 112,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 134,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 0,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 24,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 79,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 104,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 106,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 80,
+          "riichi": false
+        }
+      ]
+    },
+    {
+      "seat": 1,
+      "type": "discard",
+      "legal": [
+        {
+          "type": "discard",
+          "tileId": 0,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 4,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 5,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 68,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 88,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 95,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 96,
+          "riichi": false
+        },
+        {
+          "type": "discard",
+          "tileId": 17,
+          "riichi": false
+        }
+      ]
+    }
+  ],
   "actions": [
     {
       "type": "discard",

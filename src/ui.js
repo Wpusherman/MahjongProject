@@ -5,7 +5,8 @@
   const WINDS = ['東', '南', '西', '北'];
   const escape = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const ui = MJ.ui = { humanSeat: 0, mode: null, running: false, fast: false, token: 0,
-    record: null, review: null, pending: null, discardResolve: null, riichiWanted: false, level: 'strong', aiWeights: null, grpModel: null, rankConfig: 'tenhou' };
+    record: null, review: null, pending: null, discardResolve: null, riichiWanted: false, level: 'strong', aiWeights: null, grpModel: null, rankConfig: 'tenhou',
+    startDealer: 'random', matchSeed: null, riichiAnkan: 'wait', autoDiscardWaited: false };
   // The raw game object stays in this closure. It is exposed only to automated tests,
   // never as a normal console-accessible property in the built page.
   let currentGame = null;
@@ -77,6 +78,7 @@
     el.classList.toggle('active', obs.currentSeat === seat && !obs.ended);
     const head = document.createElement('div'); head.className = 'seat-head';
     head.innerHTML = `<span class="wind">${WINDS[obs.seatWinds[seat] - 27]}</span><span>${NAMES[seat]}</span><span class="score">${p.score.toLocaleString()}</span>` +
+      (p.isDealer ? '<span class="dealer-mark">親</span>' : '') +
       (p.riichi ? '<span class="riichi-flag">● リーチ</span>' : '');
     const row = document.createElement('div'); row.className = 'hand-row';
     const reveal = p.own || !!obs.revealAll || (obs.ended && obs.result && (obs.result.winner === seat || (obs.result.tenpai || []).includes(seat)));
@@ -182,7 +184,7 @@
       const id = obs.doraIndicators[i];
       di.appendChild(tileEl(id == null ? 0 : id >> 2, { small: true, back: id == null, red: id != null && T.isRed(id) }));
     }
-    $('center').innerHTML = `<span class="center-tag">${ui.review ? 'REPLAY' : liveRecord && liveRecord.mode === 'hanchan' ? 'HANCHAN' : 'TONPU'}</span><div class="center-round">${WINDS[obs.roundWind - 27]} ${obs.dealer + 1} 局</div><div class="center-remaining">${obs.liveRemaining}<small>枚</small></div><div class="info-line"><span>${obs.honba} 本場</span><span>供託 ${obs.riichiSticks}</span></div>`;
+    $('center').innerHTML = `<span class="center-tag">${ui.review ? 'REPLAY' : liveRecord && liveRecord.mode === 'hanchan' ? 'HANCHAN' : 'TONPU'}</span><div class="center-round">${WINDS[obs.roundWind - 27]} ${obs.roundNumber} 局</div><div class="center-remaining">${obs.liveRemaining}<small>枚</small></div><div class="info-line"><span>${obs.honba} 本場</span><span>供託 ${obs.riichiSticks}</span></div>`;
     for (let s = 0; s < 4; s++) { renderSeat(s, obs, game); renderRiver(s, obs); }
     guide(obs, game); animateDiscard(obs);
   }
@@ -234,8 +236,11 @@
         if (token !== ui.token) return Promise.resolve({ tileId: view.hand[0] });
         if (view.riichi) {
           ui.mode = 'auto-discard'; ui.discardResolve = null;
-          $('controls').innerHTML = '<span class="hint">リーチ中 — 自動ツモ切り</span>';
-          await new Promise((resolve) => setTimeout(resolve, MJ.pacing.autoDiscardDelay(ui.fast)));
+          if (!ui.autoDiscardWaited) {
+            $('controls').innerHTML = '<span class="hint">リーチ中 — 自動ツモ切り</span>';
+            await new Promise((resolve) => setTimeout(resolve, MJ.pacing.autoDiscardDelay(ui.fast)));
+          }
+          ui.autoDiscardWaited = false;
           if (token === ui.token) ui.mode = null;
           return { tileId: view.drawnTile, riichi: false, analysis: { forced: true, automatic: true } };
         }
@@ -255,9 +260,24 @@
         choices.push({ label: 'パス', value: null });
         return askChoice(`${NAMES[opts.from]} の ${T.label(opts.tile)}`, choices, token);
       },
-      wantKan(view, kans) {
-        if (view.riichi) return Promise.resolve(null);
-        return askChoice('槓を選択できます', [...kans.map((k) => ({ label: `${k.kind === 'ankan' ? '暗槓' : '加槓'} ${T.label(k.tile)}`, value: k })), { label: 'パス', value: null }], token);
+      async wantKan(view, kans) {
+        if (!Array.isArray(kans) || !kans.length) return null;
+        const options = [...kans.map((k) => ({ label: `${k.kind === 'ankan' ? '暗槓' : '加槓'} ${T.label(k.tile)}`, value: k })), { label: 'ツモ切り', value: null }];
+        if (!view.riichi) return askChoice('槓を選択できます', options, token);
+        // Riichi ankan is only legal when the wait set is unchanged. Show the
+        // choice after the same fixed delay the automatic discard would use, so
+        // the presence of a kan option does not change the visible timing.
+        if (!kans.some((k) => k.kind === 'ankan')) return null;
+        ui.mode = 'auto-discard';
+        $('controls').innerHTML = '<span class="hint">リーチ中 — 暗槓できます</span>';
+        await new Promise((resolve) => setTimeout(resolve, MJ.pacing.autoDiscardDelay(ui.fast)));
+        if (token !== ui.token) { ui.autoDiscardWaited = false; return null; }
+        ui.autoDiscardWaited = true;
+        const choice = await askChoice('暗槓できます（待ちは変わりません）', options, token);
+        // A chosen kan leads to a fresh rinshan draw, which must wait again;
+        // a pass falls through to the already-delayed automatic discard.
+        if (choice) ui.autoDiscardWaited = false;
+        return choice;
       }
     };
   }
@@ -390,18 +410,27 @@
   async function startMatch(mode) {
     stop(); const token = ui.token;
     ui.running = true; ui.fast = $('speed-fast').checked; ui.record = MJ.record.create(mode, ui.level);
+    const rules = MJ.rules.normalize({ riichiAnkan: ui.riichiAnkan || 'wait', startDealer: ui.startDealer != null ? ui.startDealer : 'random' });
+    const seed = Number.isInteger(ui.matchSeed) ? (ui.matchSeed >>> 0) : ((Date.now() ^ Math.floor(Math.random() * 0xffffffff)) >>> 0);
+    const startDealer = MJ.rules.resolveStartDealer(rules.startDealer, seed);
+    liveRecord.rules = Object.assign({}, liveRecord.rules, rules);
+    liveRecord.startDealer = startDealer; liveRecord.seed = seed;
+    ui.autoDiscardWaited = false;
     ui.animationKey = null; $('log').innerHTML = ''; $('match-label').textContent = `${mode === 'hanchan' ? '半荘戦' : '東風戦'} / ${ui.level === 'strong' ? '思考型AI' : '標準AI'}`;
-    let state = { hand: 0, dealer: 0, honba: 0, mode }, scores = [25000, 25000, 25000, 25000], sticks = 0;
+    let state = { hand: 0, dealer: startDealer, startDealer, honba: 0, mode }, scores = [25000, 25000, 25000, 25000], sticks = 0;
     try {
       while (!state.ended && token === ui.token) {
         const game = new MJ.Game({ agents: [humanAgent(token), pacedAI(1, token), pacedAI(2, token), pacedAI(3, token)],
+          rng: MJ.core.rng(seed + ':hand:' + state.hand),
           // Every seat gets the same fixed check delay, whether or not it had a
           // legal call, so the pause does not disclose hidden call options.
           onCheck: () => new Promise((resolve) => setTimeout(resolve, MJ.pacing.checkDelay(ui.fast))),
           onUpdate: () => { if (token === ui.token) render(game); }, onEvent: (msg, data) => { if (token === ui.token) { appendLog(msg, data); if (data?.type) MJ.audio.play(data.type); } } });
         currentGame = game; ui.animationKey = null; ui.waitingResult = false;
-        appendLog(`── ${state.hand < 4 ? '東' : '南'}${state.dealer + 1}局 ${state.honba}本場 ──`);
-        const playing = game.playHand({ roundWind: 27 + Math.floor(state.hand / 4), dealer: state.dealer, honba: state.honba, riichiSticks: sticks, scores: scores.slice(), hand: state.hand, mode: state.mode, rankConfig: ui.rankConfig });
+        appendLog(`── ${state.hand < 4 ? '東' : '南'}${(state.hand % 4) + 1}局 ${state.honba}本場 ──`);
+        const playing = game.playHand({ roundWind: 27 + Math.floor(state.hand / 4), dealer: state.dealer,
+          startDealer, rules, seed: seed + ':hand:' + state.hand,
+          honba: state.honba, riichiSticks: sticks, scores: scores.slice(), hand: state.hand, mode: state.mode, rankConfig: ui.rankConfig });
         liveRecord.hands.push(game.recording);
         const res = await playing;
         if (token !== ui.token || !res) return;
@@ -412,9 +441,9 @@
         state = MJ.match.advance(state, res, scores);
       }
       if (token !== ui.token) return;
-      const ranked = scores.map((score, seat) => ({ score, seat })).sort((a, b) => b.score - a.score || a.seat - b.seat);
+      const ranked = MJ.rank.order(scores, state.startDealer).map((seat) => ({ score: scores[seat], seat }));
       if (sticks) { scores[ranked[0].seat] += sticks * 1000; ranked[0].score += sticks * 1000; }
-      const settled = MJ.rank.finalResult(scores, ui.rankConfig);
+      const settled = MJ.rank.finalResult(scores, ui.rankConfig, state.startDealer);
       liveRecord.finalScores = scores; liveRecord.finalRankPoints = settled.points;
       liveRecord.rankConfig = { name: settled.config.name, uma: settled.config.uma, startScore: settled.config.startScore,
         returnScore: settled.config.returnScore, scoreUnit: settled.config.scoreUnit, scoreWeight: settled.config.scoreWeight };
@@ -515,7 +544,9 @@
     renderTimeline(h);
     const root = $('review-controls'); root.classList.remove('hidden'); root.innerHTML = '<div class="section-label">REPLAY <span>牌譜検討</span></div>';
     const select = document.createElement('select');
-    ui.record.hands.forEach((hand, i) => { const option = document.createElement('option'); option.value = i; option.textContent = `#${i + 1} ${WINDS[hand.config.roundWind - 27]}${hand.config.dealer + 1}局 ${hand.config.honba || 0}本場`; select.appendChild(option); });
+    ui.record.hands.forEach((hand, i) => { const option = document.createElement('option'); option.value = i;
+      const handIndex = Number.isInteger(hand.config.hand) ? hand.config.hand : Number.isInteger(hand.config.handIndex) ? hand.config.handIndex : i;
+      option.textContent = `#${i + 1} ${WINDS[(handIndex < 4 ? 0 : 1)]}${(handIndex % 4) + 1}局 ${hand.config.honba || 0}本場`; select.appendChild(option); });
     select.value = r.hand; select.onchange = () => { r.hand = Number(select.value); r.position = 0; renderReview(); }; root.appendChild(select);
     const check = document.createElement('label'); check.className = 'subtle-check';
     const input = document.createElement('input'); input.type = 'checkbox'; input.checked = r.reveal;

@@ -7,3 +7,4 @@ weights-*.json
 rust/target/
 __pycache__/
 *.pyc
+data/

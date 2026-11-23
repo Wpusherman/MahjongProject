@@ -5,6 +5,11 @@ const R = globalThis.MJ.rank;
 // Final placement uses raw score, and ties keep the starting seat order.
 assert.deepEqual(R.order([25000, 30000, 25000, 20000]), [1, 0, 2, 3]);
 assert.deepEqual(R.finalResult([25000, 25000, 25000, 25000], 'tenhou').ranks, [1, 2, 3, 4]);
+// With a non-zero East-1 dealer, the tie order is the rotation from that seat.
+assert.deepEqual(R.order([25000, 30000, 25000, 25000], 2), [1, 2, 3, 0]);
+assert.deepEqual(R.order([25000, 25000, 25000, 25000], 2), [2, 3, 0, 1]);
+assert.deepEqual(R.finalResult([25000, 25000, 25000, 25000], 'tenhou', 2).order, [2, 3, 0, 1]);
+assert.deepEqual(R.finalResult([25000, 25000, 25000, 25000], 'tenhou', 2).ranks, [3, 4, 1, 2]);
 
 const tenhou = R.finalResult([30000, 25000, 25000, 20000], 'tenhou');
 assert.deepEqual(tenhou.order, [0, 1, 2, 3]);

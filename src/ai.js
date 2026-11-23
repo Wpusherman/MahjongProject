@@ -24,6 +24,8 @@
     survivalBase: 0.027, survivalThreat: 0.075,
     dangerScale: 1.0, dangerPoints: 1.0,
     pushMargin: 100, callDefense: 180, callDeltaRatio: 0.025, callDeltaMin: 20,
+    rankScale: 10, rankEfficiency: 0.5, rankReserve: 1, rankRiichiMargin: 0.05, rankCallMargin: 0.5,
+    rankOrder: 0, rankRiichiEnabled: 0, rankCallEnabled: 0,
   };
   AI.setWeights = function (next) {
     if (next) for (const key of Object.keys(W)) if (Number.isFinite(next[key])) W[key] = next[key];
@@ -60,6 +62,54 @@
       model }); }
     catch (_) { return 1; }
   }
+
+  // Rank-point EV is a nonlinear function of the score swing, so a single
+  // risk multiplier cannot express "a leader protects a lead" and "a trailer
+  // must push" at the same time. These helpers price the three hand outcomes
+  // (win / deal-in / draw) with the heuristic or a loaded GRP model. When no
+  // standings are available they return null and the legacy raw-point path is
+  // used unchanged.
+  function rankContext(view, model) {
+    if (!MJ.rank || !view || !Array.isArray(view.scores) || view.scores.length !== 4 || view.handsLeft == null) return null;
+    const handsLeft = Math.max(1, Number(view.handsLeft) || 1);
+    const base = { handsLeft, honba: view.honba || 0, riichiSticks: view.riichiSticks || 0,
+      handIndex: view.handIndex, dealer: view.dealer, model };
+    try {
+      return { view, rankConfig: view.rankConfig, seat: view.seat,
+        rest: Math.max(1, handsLeft - 1), base,
+        current: MJ.rank.expectedPoints(view.scores, view.seat, 0, view.rankConfig, base).points };
+    } catch (_) { return null; }
+  }
+  function rankAt(ctx, scores, delta, sticks) {
+    if (!ctx) return null;
+    const after = scores.slice();
+    after[ctx.seat] += Number(delta) || 0;
+    // In the final hand the deal result is the game result: no later hand can
+    // repair a deal-in. Use the deterministic placement instead of pretending
+    // one more hand remains.
+    if (ctx.base.handsLeft <= 1) {
+      try { return MJ.rank.finalResult(after, ctx.rankConfig).points[ctx.seat]; }
+      catch (_) { return null; }
+    }
+    const opts = { ...ctx.base, handsLeft: ctx.rest, riichiSticks: sticks };
+    return MJ.rank.expectedPoints(after, ctx.seat, 0, ctx.rankConfig, opts).points;
+  }
+  // The winning hand ends the deal, so the win/loss/draw outcomes all use one
+  // fewer remaining hand; the current value keeps the full horizon. If we win
+  // we also collect the deposit sticks, otherwise they stay on the table.
+  function rankExpectation(ctx, pWin, winPoints, pLoss, lossPoints) {
+    if (!ctx) return null;
+    const pW = clamp(Number(pWin) || 0, 0, 1);
+    const pL = clamp(Number(pLoss) || 0, 0, 1 - pW);
+    const sticks = ctx.view.riichiSticks || 0;
+    const win = rankAt(ctx, ctx.view.scores, Math.max(0, winPoints) + sticks * 1000, 0);
+    const loss = rankAt(ctx, ctx.view.scores, -Math.max(0, lossPoints), sticks);
+    const draw = rankAt(ctx, ctx.view.scores, 0, sticks);
+    const expected = pW * win + pL * loss + (1 - pW - pL) * draw;
+    return { current: ctx.current, win, loss, draw, expected, gain: round(expected - ctx.current),
+      pWin: round(pW), pLoss: round(pL) };
+  }
+  AI.rankExpectation = rankExpectation;
 
   // Public-information danger model. These are heuristic probabilities, not calibrated frequencies.
   AI.risk = function (t, view, w = AI.weights) {
@@ -521,6 +571,10 @@
     AI.assertObservation(rawView);
     const view = normalized(rawView), counts = T.countsFromIds(view.hand), evaluate = evaluator(view, w);
     const turns = horizon(view), reds = redCount(view), bias = rankBias(view, options.rankBias !== false, options.rankModel), candidates = [];
+    // Rank EV replaces the raw-score comparison whenever standings are known.
+    // `rankBias: false` stays the legacy raw-point baseline for paired tests.
+    const rctx = options.rankBias !== false ? rankContext(view, options.rankModel) : null;
+    const honbaBonus = (view.honba || 0) * 300;
     const types = [...new Set((view.legalDiscards || view.hand).filter((id) => !(view.forbidden || []).includes(id >> 2)).map((id) => id >> 2))];
     // Fast profile: compute the cheap shanten/ukeire for every discard, then run
     // the full block-shape evaluation only for the best root candidates.
@@ -560,10 +614,18 @@
       // Folding with duplicate safer tiles reserves safe exits for later turns.
       const reserve = risk.probability < 0.09 ? Math.max(0, copies - 1) * (1 - risk.probability * 8) * 65 : 0;
       const futureLoss = view.threat ? risk.loss * Math.min(3, 0.65 + ev.sh * 0.65) : 0;
-      const expectedNet = ev.grossEV - (risk.loss + futureLoss) * bias;
+      const loss = risk.loss + futureLoss;
+      const expectedNet = ev.grossEV - loss * bias;
+      const rank = rankExpectation(rctx, ev.winProbability, ev.estimatedWinPoints + honbaBonus,
+        risk.probability, loss + honbaBonus);
+      const efficiency = -ev.sh * w.shantenCost + ev.ukeire * w.ukeireGain + ev.shape * w.shapeGain;
+      const legacyScore = view.threat ? expectedNet + reserve + ev.score * 0.08 : ev.score;
+      const score = rank && w.rankOrder ? (rank.expected - rank.current) * w.rankScale + efficiency * w.rankEfficiency + (view.threat ? reserve * w.rankReserve : 0)
+        : legacyScore;
       candidates.push({ ...ev, t, tileId, danger: round(risk.probability * 100), dangerByOpponent: risk.detail,
-        expectedLoss: round(risk.loss + futureLoss), expectedNet, reserve,
-        doraLoss: dora(t, view) + Number(T.isRed(tileId)), score: view.threat ? expectedNet + reserve + ev.score * 0.08 : ev.score });
+        expectedLoss: round(loss), expectedNet, reserve, efficiency: round(efficiency),
+        rankEV: rank ? round(rank.expected) : null, rankGain: rank ? rank.gain : null, rank,
+        doraLoss: dora(t, view) + Number(T.isRed(tileId)), score });
     }
     // In the fast profile the fully evaluated roots stay ahead of the cheap
     // approximations; otherwise a loose acceptance bound could outrank them.
@@ -580,7 +642,14 @@
         c.improvedUkeire = round(next.improvedUkeire);
         c.winProbability = next.winProbability; c.tenpaiProbability = next.tenpaiProbability;
         c.expectedNet = next.expectedGross - c.expectedLoss;
-        c.score = c.score * 0.35 + next.nextScore * 0.65;
+        if (c.rank && rctx && w.rankOrder) {
+          const rr = rankExpectation(rctx, next.winProbability, c.estimatedWinPoints + honbaBonus,
+            (c.danger || 0) / 100, c.expectedLoss + honbaBonus);
+          if (rr) {
+            c.rank = rr; c.rankEV = round(rr.expected); c.rankGain = rr.gain;
+            c.score = (rr.expected - rr.current) * w.rankScale + c.efficiency * w.rankEfficiency + (view.threat ? c.reserve * w.rankReserve : 0);
+          } else c.score = c.score * 0.35 + next.nextScore * 0.65;
+        } else c.score = c.score * 0.35 + next.nextScore * 0.65;
         c.searched = true;
       }
       candidates.sort((a, b) => b.score - a.score || b.t - a.t);
@@ -603,7 +672,11 @@
     const opts = callOptions;
     const view = normalized(rawView), turns = horizon(view), ev = evaluator(view, w), bias = rankBias(view, options.rankBias !== false, options.rankModel);
     const counts = T.countsFromIds(view.hand), pass = ev(counts, view.unseen, turns, redCount(view));
-    const alternatives = [{ action: null, label: '見送り', sh: pass.sh, ukeire: pass.ukeire, expectedNet: round(pass.grossEV), winProbability: pass.winProbability }];
+    const rctx = options.rankBias !== false ? rankContext(view, options.rankModel) : null;
+    const honbaBonus = (view.honba || 0) * 300;
+    const passRank = rankExpectation(rctx, pass.winProbability, pass.estimatedWinPoints + honbaBonus, 0, 0);
+    const alternatives = [{ action: null, label: '見送り', sh: pass.sh, ukeire: pass.ukeire, expectedNet: round(pass.grossEV),
+      winProbability: pass.winProbability, rankEV: passRank ? round(passRank.expected) : null, rankExpected: passRank ? passRank.expected : null, rank: passRank }];
     const actions = [];
     if (opts.pon != null) actions.push({ type: 'pon', tile: opts.tile });
     for (const pair of opts.chi || []) actions.push({ type: 'chi', tile: opts.tile, tiles: pair });
@@ -622,53 +695,171 @@
         const next = lookahead(T.countsFromIds(hand), v, evaluator(v, w), turns, redCount(v), w);
         result = { sh: bestRoute(T.countsFromIds(hand), v.melds.length).sh, ukeire: next.futureUkeire,
           expectedNet: next.expectedGross - (view.threat ? 500 : 120), winProbability: next.winProbability };
-      } else result = AI.analyzeDiscard(v, 'standard', w, { rankBias: options.rankBias !== false }).candidates[0];
+      } else result = AI.analyzeDiscard(v, 'standard', w, { rankBias: options.rankBias !== false, rankModel: options.rankModel }).candidates[0];
       if (!result) continue;
       // Fewer concealed tiles also reduce future defensive exits.
       const defenseCost = view.threat ? (w.callDefense + 80 * v.melds.length) * bias : 0;
+      let rankExpected = result.rank ? result.rank.expected : null;
+      if (rankExpected != null && defenseCost && rctx) {
+        // Price the lost defensive exits in rank points, not raw points.
+        rankExpected -= rctx.current - rankAt(rctx, view.scores, -defenseCost, view.riichiSticks);
+      }
       alternatives.push({ action, label: action.type === 'chi' ? 'チー ' + action.tiles.map(T.label).join('・') : action.type === 'pon' ? 'ポン' : '大明槓',
-        discard: result.tileId, sh: result.sh, ukeire: round(result.ukeire), expectedNet: round(result.expectedNet - defenseCost), winProbability: result.winProbability });
+        discard: result.tileId, sh: result.sh, ukeire: round(result.ukeire), expectedNet: round(result.expectedNet - defenseCost),
+        winProbability: result.winProbability, rankEV: rankExpected == null ? null : round(rankExpected),
+        rankExpected, rank: result.rank || null });
     }
     const baseline = alternatives[0].expectedNet;
-    const calls = alternatives.slice(1).sort((a, b) => b.expectedNet - a.expectedNet);
+    const rankMode = rctx && options.rankBias !== false && w.rankCallEnabled !== 0 && alternatives.every((a) => a.rankExpected != null);
+    const calls = alternatives.slice(1).sort((a, b) => rankMode ? b.rankExpected - a.rankExpected : b.expectedNet - a.expectedNet);
     const best = calls[0];
     const delta = best ? best.expectedNet - baseline : 0;
     // Normalized EV difference stays defined with zero/negative EV; it is NOT a win probability.
     const advantagePercent = best ? 100 * delta / Math.max(100, Math.abs(best.expectedNet), Math.abs(baseline)) : 0;
-    const selected = best && delta > Math.max(w.callDeltaMin, Math.abs(baseline) * w.callDeltaRatio) ? best.action : null;
+    const rankDelta = rankMode && best ? best.rankExpected - alternatives[0].rankExpected : null;
+    const selected = rankMode
+      ? (best && rankDelta > (w.rankCallMargin == null ? 0.05 : w.rankCallMargin) ? best.action : null)
+      : (best && delta > Math.max(w.callDeltaMin, Math.abs(baseline) * w.callDeltaRatio) ? best.action : null);
     return { version: AI.version, kind: 'call', model: 'approximate net EV', unseen: view.unseen.slice(), horizon: turns, rankBias: bias,
+      rankMode: !!rankMode, rankDelta: rankDelta == null ? null : round(rankDelta),
       alternatives, selected, bestCall: best?.action || null, delta: round(delta), advantagePercent: round(advantagePercent),
       percentDefinition: '(bestCallEV - passEV) / max(100, abs(bestCallEV), abs(passEV)) * 100' };
   };
+  // Compare riichi with dama in rank-point space. The deposit is lost on a
+  // draw/deal-in and returned with the sticks on a win; the riichi yaku is
+  // approximated as +1000 points on the winning hand.
+  AI.rankRiichi = function (view, best, w = AI.weights, model) {
+    const ctx = rankContext(view, model);
+    if (!ctx || !best) return { accept: true, reason: 'no-standings' };
+    const honba = (view.honba || 0) * 300;
+    const pWin = clamp(best.winProbability || 0, 0, 1);
+    const pLoss = clamp((best.danger || 0) / 100, 0, 1);
+    const winPoints = Math.max(0, best.estimatedWinPoints || 0) + honba;
+    const lossPoints = Math.max(0, best.expectedLoss || 0) + honba;
+    const dama = rankExpectation(ctx, pWin, winPoints, pLoss, lossPoints);
+    const after = view.scores.slice();
+    after[view.seat] -= 1000;
+    const ctxR = rankContext({ ...view, scores: after }, model);
+    const riichi = rankExpectation(ctxR, clamp(pWin * 1.08, 0, 1), winPoints + 1000,
+      clamp(pLoss * 1.1, 0, 1), lossPoints);
+    const gain = riichi ? riichi.expected - dama.expected : 0;
+    return { accept: gain >= -(w.rankRiichiMargin == null ? 0.05 : w.rankRiichiMargin),
+      reason: 'rank-ev', gain: round(gain), dama, riichi };
+  };
+  AI.winScores = function (view, win, tsumo, loser) {
+    const score = win && win.score;
+    if (!score || !score.payments || !Array.isArray(view.scores) || view.scores.length !== 4) return null;
+    const after = view.scores.slice(), seat = view.seat;
+    let received = 0;
+    for (let s = 0; s < 4; s++) {
+      if (s === seat || (!tsumo && s !== loser)) continue;
+      const base = !tsumo ? score.payments.ron
+        : seat === view.dealer ? score.payments.each
+          : s === view.dealer ? score.payments.fromDealer : score.payments.fromOthers;
+      const pay = (base || 0) + (view.honba || 0) * (tsumo ? 100 : 300);
+      after[s] -= pay; received += pay;
+    }
+    after[seat] += received + (view.riichiSticks || 0) * 1000;
+    return after;
+  };
+  // In the final hand a non-dealer win ends the game. If it still leaves us last,
+  // passing keeps the deal (and the game) alive, so a cheap "cannot rise" win is
+  // declined. A dealer win repeats the hand, so it is always accepted.
+  AI.wantWin = function (view, win, tsumo, loser, options = {}) {
+    if (options.rankBias === false) return { accept: true, reason: 'rank-bias-off' };
+    if (!view || view.handsLeft == null || view.handsLeft > 1 || view.isDealer) return { accept: true, reason: 'not-final-or-dealer' };
+    if (!MJ.rank) return { accept: true, reason: 'no-rank' };
+    const scores = AI.winScores(view, win, tsumo, loser);
+    if (!scores) return { accept: true, reason: 'no-win-score' };
+    let rankAfter;
+    try { rankAfter = MJ.rank.finalResult(scores, view.rankConfig).ranks[view.seat]; }
+    catch (_) { return { accept: true, reason: 'rank-error' }; }
+    return { accept: rankAfter !== 4, reason: rankAfter === 4 ? 'win-keeps-last' : 'win-improves',
+      rankAfter, scores };
+  };
+  // A wait-preserving concealed kan after riichi is already legal (see
+  // `Game.availableKans`). The strategic question is the dora swing: a new kan
+  // dora and ura indicator help us on a win, but the same dora helps every
+  // opponent. While someone is riichi, or too late for a rinshan draw, decline.
+  AI.riichiKanDecision = function (view, kan) {
+    const live = view.liveRemaining == null ? 70 : view.liveRemaining;
+    const threats = (view.opponents || []).filter((o) => o.riichi).length;
+    const dora = (view.doraIndicators || []).length;
+    const reason = threats ? 'threat' : live < 8 ? 'late' : dora >= 5 ? 'max-dora' : 'value';
+    const accept = !threats && live >= 8 && dora < 5;
+    const value = accept ? Math.round(20 + live * 0.3 + dora * 4) : 0;
+    return { accept, value, reason, threats, liveRemaining: live, kan: { kind: kan.kind, tile: kan.tile } };
+  };
+
   AI.create = function (seat, opts = {}) {
     const weights = opts.weights ? { ...AI.weights, ...opts.weights } : AI.weights;
     const useRankBias = opts.rankBias !== false;
     // undefined = use the globally loaded GRP model; null = heuristic rank EV.
     const useRankModel = opts.rankModel;
     const fast = opts.fast === true || opts.level === 'fast';
+    const policy = opts.policy || null;
     return {
-      seat, weights, lastCallAnalysis: null,
-      async wantTsumo() { return true; },
+      seat, weights, lastCallAnalysis: null, lastRiichiDecision: null, lastWinDecision: null, policy,
+      async wantTsumo(view) {
+        AI.assertObservation(view);
+        if (policy && MJ.policy) {
+          const accept = await MJ.policy.chooseTsumo(policy, view);
+          this.lastWinDecision = { accept, reason: 'policy' };
+          return accept;
+        }
+        this.lastWinDecision = AI.wantWin(view, view && view.win, true, null,
+          { rankBias: useRankBias, rankModel: useRankModel });
+        return this.lastWinDecision.accept;
+      },
       async chooseDiscard(view) {
         AI.assertObservation(view);
         if (view.riichi) return { tileId: view.drawnTile, riichi: false, analysis: { version: AI.version, forced: true } };
+        if (policy && MJ.policy) {
+          const decision = await MJ.policy.chooseDiscard(policy, view);
+          if (decision) {
+            const tileId = pickId(view.hand, decision.tile, view.drawnTile);
+            if (tileId != null) return { tileId, riichi: decision.riichi,
+              analysis: { version: AI.version, policy: true, model: 'obs-v1-resnet', probabilities: decision.probabilities } };
+          }
+        }
         const analysis = AI.analyzeDiscard(view, opts.level || 'strong', weights,
           { rankBias: useRankBias, rankModel: useRankModel, fast, rootCandidates: opts.rootCandidates }), best = analysis.candidates[0];
         const margin = weights.pushMargin * rankBias(view, useRankBias, useRankModel);
-        const riichi = view.menzen && best.sh === 0 && !best.furiten && view.score >= 1000 && view.liveRemaining >= 4 && (!view.threat || best.expectedNet > margin);
+        let riichi = view.menzen && best.sh === 0 && !best.furiten && view.score >= 1000 && view.liveRemaining >= 4 && (!view.threat || best.expectedNet > margin);
+        if (riichi && useRankBias && weights.rankRiichiEnabled !== 0) {
+          this.lastRiichiDecision = AI.rankRiichi(view, best, weights, useRankModel);
+          riichi = this.lastRiichiDecision.accept;
+        }
         return { tileId: best.tileId, riichi, analysis };
       },
       async wantCall(view, options) {
         AI.assertObservation(view);
         this.lastCallAnalysis = null;
         if (!options || (!options.ron && options.pon == null && options.kan == null && !(options.chi || []).length)) return null;
-        if (options.ron) return { type: 'ron' };
+        if (policy && MJ.policy) {
+          const action = await MJ.policy.chooseCall(policy, view, options);
+          this.lastCallAnalysis = { version: AI.version, kind: 'call', policy: true, selected: action };
+          return action;
+        }
+        if (options.ron) {
+          this.lastWinDecision = AI.wantWin(view, options.win || view.win, false,
+            view.callFrom != null ? view.callFrom : options.from,
+            { rankBias: useRankBias, rankModel: useRankModel });
+          return this.lastWinDecision.accept ? { type: 'ron' } : null;
+        }
         if (view.riichi) return null;
         this.lastCallAnalysis = AI.analyzeCall(view, options, weights, { rankBias: useRankBias, rankModel: useRankModel });
         return this.lastCallAnalysis.selected;
       },
       async wantKan(view, kans) {
         AI.assertObservation(view);
+        if (!Array.isArray(kans) || !kans.length) return null;
+        if (view.riichi) {
+          const ankan = kans.find((k) => k.kind === 'ankan');
+          if (!ankan) return null;
+          this.lastKanDecision = AI.riichiKanDecision(view, ankan);
+          return this.lastKanDecision.accept ? ankan : null;
+        }
         if (view.threat || view.liveRemaining < 8) return null;
         const c = T.countsFromIds(view.hand), base = bestRoute(c, view.melds.length).sh;
         return kans.find((k) => { const after = c.slice(); after[k.tile] -= k.kind === 'ankan' ? 4 : 1;

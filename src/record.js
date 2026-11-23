@@ -19,9 +19,10 @@
   const R = MJ.record = {
     create(mode, level) {
       return { format: 'suitaku-riichi', version: 1, createdAt: new Date().toISOString(), mode, ai: level,
+        startDealer: null,
         rules: { players: 4, initialScore: 25000, redFives: 3, openTanyao: true, ron: 'atamahane',
           dealerTenpaiRepeat: true, agariYame: false, extension: false, kuikae: false,
-          nineTerminals: false, nagashiMangan: false }, hands: [], annotations: [] };
+          nineTerminals: false, nagashiMangan: false, riichiAnkan: 'wait', startDealer: 'random' }, hands: [], annotations: [] };
     },
     // A record that is still being played. The wall, the other seats' initial
     // hands, their draws and their call options are removed before anything is
@@ -80,6 +81,7 @@
       for (const h of data.hands) {
         if (!h || !h.config || !nonnegative(h.config.honba) || !nonnegative(h.config.riichiSticks)) throw new Error('本場・供託が不正です。');
         if (!ids(h.wall) || new Set(h.wall).size !== 136 || !h.config || !Number.isInteger(h.config.dealer) || h.config.dealer < 0 || h.config.dealer > 3 || ![27, 28].includes(h.config.roundWind) || !Array.isArray(h.config.scores) || h.config.scores.length !== 4 || !h.config.scores.every(Number.isFinite) || !Array.isArray(h.initialHands) || h.initialHands.length !== 4 || !h.initialHands.every(ids) || !Array.isArray(h.events) || h.events.length > 2000) throw new Error('牌譜の局データが不正です。');
+        if (h.config.startDealer != null && (!Number.isInteger(h.config.startDealer) || h.config.startDealer < 0 || h.config.startDealer > 3)) throw new Error('起家が不正です。');
         for (const e of h.events) {
           if (!e || !['start', 'draw', 'discard', 'response', 'call', 'kan', 'dora', 'riichi', 'end'].includes(e.type)) throw new Error('牌譜のイベントが不正です。');
           if (e.seat != null && (!Number.isInteger(e.seat) || e.seat < 0 || e.seat > 3)) throw new Error('席番号が不正です。');
@@ -138,7 +140,8 @@
     text(data) {
       const T = MJ.tiles, lines = ['翠卓 牌譜 v1', data.createdAt, data.mode === 'hanchan' ? '半荘' : '東風'];
       data.hands.forEach((h, i) => {
-        lines.push(`\n局 #${i + 1} ${h.config.roundWind === 27 ? '東' : '南'}${h.config.dealer + 1}局 ${h.config.honba || 0}本場`);
+        const handIndex = Number.isInteger(h.config.hand) ? h.config.hand : Number.isInteger(h.config.handIndex) ? h.config.handIndex : i;
+        lines.push(`\n局 #${i + 1} ${handIndex < 4 ? '東' : '南'}${(handIndex % 4) + 1}局 ${h.config.honba || 0}本場`);
         for (const e of h.events) {
           if (e.type === 'discard') lines.push(`[${e.index}] P${e.seat + 1} ${e.tsumogiri ? 'ツモ切り' : '手出し'} ${T.isRed(e.tileId) ? '赤' : ''}${T.label(e.tileId >> 2)}${e.riichi ? ' リーチ宣言' : ''}`);
           else if (e.type === 'draw') lines.push(`[${e.index}] P${e.seat + 1} ${e.rinshan ? '嶺上' : ''}ツモ ${e.hidden ? '?' : T.label(e.tileId >> 2)}`);

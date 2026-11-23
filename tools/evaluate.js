@@ -15,7 +15,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { Worker } = require('node:worker_threads');
-for (const file of ['tiles', 'shanten', 'agari', 'yaku', 'score', 'rank', 'grp', 'ai', 'game', 'record', 'core', 'evaluate']) {
+for (const file of ['tiles', 'shanten', 'agari', 'yaku', 'score', 'rank', 'grp', 'ai', 'game', 'record', 'core', 'features', 'evaluate', 'policy']) {
   require(path.join(__dirname, '..', 'src', file + '.js'));
 }
 const MJ = globalThis.MJ;
@@ -50,11 +50,15 @@ function parseArgs(argv) {
     else if (key === '--grp') args.grp = argv[++i];
     else if (key === '--candidate-grp') args.candidateGrp = argv[++i];
     else if (key === '--baseline-grp') args.baselineGrp = argv[++i];
+    else if (key === '--policy-model') args.policyModel = argv[++i];
+    else if (key === '--candidate-policy') args.candidatePolicy = argv[++i];
+    else if (key === '--baseline-policy') args.baselinePolicy = argv[++i];
     else if (key === '--baseline-heuristic') { args.baselineHeuristic = true; continue; }
     else if (key === '--candidate-seat') args.candidateSeat = argv[++i];
     else if (key === '--score-pattern') args.scorePattern = argv[++i];
     else if (key === '--initial-scores') args.initialScores = argv[++i].split(',').map(Number);
     else if (key === '--dealer') args.dealer = Number(argv[++i]);
+    else if (key === '--start-dealer') { const v = argv[++i]; args.startDealer = v === 'random' ? 'random' : Number(v); }
     else if (key === '--out') args.out = argv[++i];
     else throw new Error('unknown option: ' + key);
   }
@@ -76,9 +80,11 @@ const loadStartStates = (file) => {
     const dealer = Number.isInteger(row.dealer) ? row.dealer : 0;
     if (dealer < 0 || dealer > 3) throw new Error(`${file}:${i + 1}: dealer must be 0..3`);
     return { scores: row.scores.slice(), dealer,
+      startDealer: Number.isInteger(row.startDealer) ? row.startDealer : dealer,
       honba: Math.max(0, Number(row.honba) || 0), riichiSticks: Math.max(0, Number(row.riichiSticks) || 0),
       handIndex: Math.max(0, Math.min(7, Number(row.handIndex) || 0)),
-      roundWind: row.roundWind == null ? null : Number(row.roundWind) };
+      roundWind: row.roundWind == null ? null : Number(row.roundWind),
+      source: row.source == null ? null : String(row.source) };
   });
   if (!states.length) throw new Error('start-states file is empty');
   return states;
@@ -107,8 +113,12 @@ const usage = [
   '  --grp FILE           learned GRP JSON model; replaces the heuristic rank EV (both sides)',
   '  --candidate-grp FILE use a GRP rank model for the candidate only',
   '  --baseline-grp FILE  use a GRP rank model for the baseline only',
+  '  --policy-model FILE  ONNX policy model for both sides',
+  '  --candidate-policy FILE  ONNX policy model for the candidate only',
+  '  --baseline-policy FILE   ONNX policy model for the baseline only',
   '  --baseline-heuristic force the heuristic rank EV for the baseline (overrides a global --grp)',
-  '  --dealer N           fixed dealer seat (default: seed-dependent)',
+  '  --dealer N           legacy alias for a fixed East-1 dealer seat',
+  '  --start-dealer S     random (default, seed-derived) | 0..3 fixed East-1 dealer',
   '  --control            also run baseline-vs-baseline and report paired delta',
   '  --profile            per-hand phase timings (shanten, ukeire, shape, scoring, lookahead)',
   '  --divergence         same-observation action divergence between candidate and baseline',
@@ -167,13 +177,17 @@ async function evaluate(params) {
     matchMode: args.match === 'tonpu' || args.match === 'hanchan' ? args.match : null,
     candidateSeatMode: args.candidateSeat || 'rotate',
     scorePattern: args.scorePattern === 'even' ? 'even' : 'handicap',
+    startDealer: args.startDealer != null ? args.startDealer : undefined,
+    dealer: Number.isInteger(args.dealer) ? args.dealer : undefined,
     initialScores: Array.isArray(args.initialScores) && args.initialScores.length === 4 && args.initialScores.every(Number.isFinite)
       ? args.initialScores : null,
     startStates, rootCandidates: Number.isFinite(args.rootCandidates) ? args.rootCandidates : undefined,
     grpModel, candidateRankModel, baselineRankModel, profile: !!args.profile, divergence: !!args.divergence,
+    candidatePolicyFile: args.candidatePolicy || args.policyModel || null,
+    baselinePolicyFile: args.baselinePolicy || args.policyModel || null,
     dealer: Number.isFinite(args.dealer) ? args.dealer : undefined };
   const seatsPerSeed = common.candidateSeatMode === 'rotate' ? 4 : 1;
-  console.log(`evaluating ${args.seeds} seeds (${args.seeds * seatsPerSeed} games), workers=${args.workers}, match=${common.matchMode || 'single-hand'}, seat=${common.candidateSeatMode}, scores=${startStates ? 'start-states:' + startStates.length : common.initialScores ? 'custom' : common.scorePattern}, level=${common.candidateLevel}/${common.baselineLevel}, rankBias=${common.candidateRankBias}/${common.baselineRankBias}`);
+  console.log(`evaluating ${args.seeds} seeds (${args.seeds * seatsPerSeed} games), workers=${args.workers}, match=${common.matchMode || 'single-hand'}, seat=${common.candidateSeatMode}, scores=${startStates ? 'start-states:' + startStates.length : common.initialScores ? 'custom' : common.scorePattern}, level=${common.candidateLevel}/${common.baselineLevel}, rankBias=${common.candidateRankBias}/${common.baselineRankBias}` + (common.candidatePolicyFile || common.baselinePolicyFile ? `, policy=${common.candidatePolicyFile || '-'}/${common.baselinePolicyFile || '-'}` : ''));
   const started = Date.now();
   const candidateRun = await evaluate({ ...common, candidateWeights, baselineWeights });
   const candidateRows = candidateRun.rows;
@@ -183,13 +197,15 @@ async function evaluate(params) {
     const controlRun = await evaluate({ ...common, candidateWeights: baselineWeights, baselineWeights,
       candidateLevel: common.baselineLevel, baselineLevel: common.baselineLevel,
       candidateRankModel: common.baselineRankModel, baselineRankModel: common.baselineRankModel,
-      candidateRankBias: common.baselineRankBias, baselineRankBias: common.baselineRankBias });
+      candidateRankBias: common.baselineRankBias, baselineRankBias: common.baselineRankBias,
+      candidatePolicyFile: common.baselinePolicyFile, baselinePolicyFile: common.baselinePolicyFile });
     controlRows = controlRun.rows; controlProfile = controlRun.profile;
   }
   const elapsedMs = Date.now() - started;
   const candidate = MJ.evaluate.summarize(candidateRows, { rankConfig: args.rank });
   const control = controlRows ? MJ.evaluate.summarize(controlRows, { rankConfig: args.rank }) : null;
   const delta = controlRows ? MJ.evaluate.pairedDelta(candidateRows, controlRows) : null;
+  const divergence = args.divergence ? MJ.evaluate.divergentSummary(candidateRows, controlRows) : null;
   const gamesPerSecond = candidateRows.length / (elapsedMs / 1000);
   const effects = args.effects.length ? args.effects : [0.2];
   const power = effects.map((effect) => MJ.evaluate.power({ sd: candidate.seedClusterRankPoints.sd, effect,
@@ -204,13 +220,15 @@ async function evaluate(params) {
       candidate: args.candidate || 'built-in', baseline: args.baseline || 'built-in', control: !!args.control,
       grp: args.grp || null, candidateGrp: args.candidateGrp || null,
       baselineGrp: args.baselineHeuristic ? 'heuristic' : args.baselineGrp || null,
+      candidatePolicy: common.candidatePolicyFile, baselinePolicy: common.baselinePolicyFile,
       rootCandidates: common.rootCandidates || null,
       candidateRankBias: common.candidateRankBias, baselineRankBias: common.baselineRankBias },
     candidate, control, delta, power, throughput: { elapsedMs, gamesPerSecond },
+    divergence,
     profile: candidateRun.profile,
     controlProfile: controlProfile
   };
-  console.log(MJ.evaluate.formatReport(candidate, { control, delta, elapsedMs, gamesPerSecond, power }));
+  console.log(MJ.evaluate.formatReport(candidate, { control, delta, elapsedMs, gamesPerSecond, power, divergence }));
   if (candidateRun.profile) {
     const p = candidateRun.profile, total = p.shanten + p.shape + p.scoring + p.risk + p.lookahead;
     console.log(`profile: ${p.evaluations} candidate evaluations; shanten ${p.shanten.toFixed(0)} ms, ukeire ${p.ukeire.toFixed(0)} ms (inner shanten), shape ${p.shape.toFixed(0)} ms, scoring ${p.scoring.toFixed(0)} ms, lookahead ${p.lookahead.toFixed(0)} ms, risk ${p.risk.toFixed(0)} ms (timed total ${total.toFixed(0)} ms)`);

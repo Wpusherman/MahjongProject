@@ -79,6 +79,37 @@ const FAST = process.argv.includes('--fast');
     await page.screenshot({ path: path.resolve(__dirname, '../test-results/table-mobile.png'), fullPage: true });
     assert(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
     await page.setViewportSize({ width: 1440, height: 1100 });
+    // Fixed seating: human seat 0 is North when seat 1 is the East-1 dealer.
+    const north = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    await north.goto(pathToFileURL(path.resolve(__dirname, '../mahjong.html')).href);
+    await north.evaluate(() => { MJ.ui.startDealer = 1; MJ.ui.matchSeed = 12345; });
+    await north.getByRole('button', { name: '対局をはじめる →' }).click();
+    await north.waitForFunction(() => MJ.ui.mode === 'discard' || MJ.ui.mode === 'choice');
+    assert.equal(await north.locator('#seat-0 .wind').textContent(), '北', 'human is North when seat 1 is dealer');
+    assert.equal(await north.locator('#seat-1 .dealer-mark').count(), 1, 'the dealer mark follows the current dealer');
+    assert((await north.locator('.center-round').textContent()).replace(/\s+/g, ' ').trim().startsWith('東 1'),
+      'the round number comes from dealer moves, not the dealer seat');
+    await north.close();
+    // Riichi ankan UI: the human gets a kan / tsumogiri choice with a fixed delay.
+    const kanPage = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    await kanPage.goto(pathToFileURL(path.resolve(__dirname, '../mahjong.html')).href);
+    await kanPage.getByRole('button', { name: '対局をはじめる →' }).click();
+    await kanPage.waitForFunction(() => MJ.ui.mode === 'discard');
+    const kanButtons = await kanPage.evaluate(async () => {
+      window.__SUITAKU_DEBUG__ = true;
+      const ui = MJ.ui; ui.fast = true;
+      const view = { ...ui.view, riichi: true };
+      window.kanChoice = undefined;
+      ui.game.agents[0].wantKan(view, [{ kind: 'ankan', tile: 0 }]).then((value) => { window.kanChoice = value; });
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      return { mode: ui.mode, labels: [...document.querySelectorAll('#controls button')].map((b) => b.textContent) };
+    });
+    assert.equal(kanButtons.mode, 'choice');
+    assert(kanButtons.labels.some((label) => label.startsWith('暗槓')), 'riichi ankan button is offered');
+    assert(kanButtons.labels.includes('ツモ切り'), 'tsumogiri remains available');
+    await kanPage.getByRole('button', { name: 'ツモ切り', exact: true }).click();
+    await kanPage.waitForFunction(() => window.kanChoice === null);
+    await kanPage.close();
     if (FAST) {
       assert.deepEqual(errors, []);
       console.log('Browser UI fast OK: desktop/mobile, font, river layout, hidden hands');

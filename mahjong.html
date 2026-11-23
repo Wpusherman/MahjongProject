@@ -48,6 +48,7 @@ input[type=checkbox] { accent-color:var(--gold); } .hidden { display:none!import
 .seat-head .score { margin-left:10px; font:600 21px 'Consolas',monospace; color:#f0ede0; }
 .seat.active .seat-head { border-color:#d7b67a; box-shadow:0 0 16px #d7b67a15; }
 .wind { color:var(--gold); font-weight:bold; font-size:17px; } .riichi-flag { color:#ffb3a5; font-size:11px; }
+.dealer-mark { color:#0f2422; background:#d7b67a; border-radius:3px; padding:0 5px; font-size:10px; font-weight:700; letter-spacing:1px; }
 .hand-row { display:flex; align-items:flex-end; justify-content:center; gap:2px; --tile-w:39px; --tile-h:54px; min-height:55px; }
 .seat-bottom .hand-row { --tile-w:42px; --tile-h:59px; }
 .hand-row .drawn { margin-right:14px; } .melds-row { display:flex; gap:9px; position:absolute; top:93px; right:0; }
@@ -957,15 +958,19 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
     return resolved;
   };
 
-  R.order = function (scores) {
+  // Ties use the starting seat order: positions counted from the match's East-1
+  // dealer (0 = 起家), not the absolute seat number.
+  const orderIndex = (seat, startDealer) => Number.isInteger(startDealer) ? (seat - startDealer + 4) % 4 : seat;
+  R.order = function (scores, startDealer) {
     return scores.map((score, seat) => ({ score, seat }))
-      .sort((a, b) => b.score - a.score || a.seat - b.seat).map((x) => x.seat);
+      .sort((a, b) => b.score - a.score || orderIndex(a.seat, startDealer) - orderIndex(b.seat, startDealer))
+      .map((x) => x.seat);
   };
 
-  R.finalResult = function (scores, config) {
+  R.finalResult = function (scores, config, startDealer) {
     const c = R.resolve(config);
     if (!Array.isArray(scores) || scores.length !== 4 || !scores.every(Number.isFinite)) throw new Error('scores must be four finite numbers');
-    const order = R.order(scores), ranks = Array(4), points = Array(4), uma = Array(4), raw = Array(4), oka = Array(4);
+    const order = R.order(scores, startDealer), ranks = Array(4), points = Array(4), uma = Array(4), raw = Array(4), oka = Array(4);
     order.forEach((seat, i) => { ranks[seat] = i + 1; });
     const okaValue = Math.max(0, (c.returnScore - c.startScore) * 4 / c.scoreUnit);
     for (let seat = 0; seat < 4; seat++) {
@@ -1059,15 +1064,20 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
   G.encode = function (state) {
     if (!state || !Array.isArray(state.scores) || state.scores.length !== 4) throw new Error('grp.encode requires four scores');
     const seat = Number.isInteger(state.seat) && state.seat >= 0 && state.seat < 4 ? state.seat : 0;
+    const startDealer = Number.isInteger(state.startDealer) ? state.startDealer : 0;
     const scores = state.scores.map((s) => finite(Number(s), 25000));
+    // Score slots are ordered from the match's East-1 dealer (0 = 起家), not by
+    // absolute seat number. With the default startDealer 0 this is unchanged.
+    const seatAt = (slot) => (startDealer + slot) % 4;
+    const slotOf = (s) => (s - startDealer + 4) % 4;
     const values = [];
-    for (let s = 0; s < 4; s++) values.push(scores[s] / 1000);
-    for (let s = 0; s < 4; s++) values.push((scores[seat] - scores[s]) / 1000);
+    for (let slot = 0; slot < 4; slot++) values.push(scores[seatAt(slot)] / 1000);
+    for (let slot = 0; slot < 4; slot++) values.push((scores[seat] - scores[seatAt(slot)]) / 1000);
     values.push(finite(Number(state.honba), 0) / 10, finite(Number(state.riichiSticks), 0) / 10,
       clamp(finite(Number(state.handsLeft), 4), 1, 16) / 8,
       clamp(finite(Number(state.handIndex), 0), 0, 8) / 8,
       state.dealer === seat ? 1 : 0);
-    for (let s = 0; s < 4; s++) values.push(seat === s ? 1 : 0);
+    for (let slot = 0; slot < 4; slot++) values.push(slotOf(seat) === slot ? 1 : 0);
     return values;
   };
 
@@ -1080,7 +1090,11 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
       return end && end.scores;
     })();
     if (!Array.isArray(finalScores) || finalScores.length !== 4) throw new Error('grp.dataset requires finalScores');
-    const settled = MJ.rank.finalResult(finalScores, options.rankConfig || 'tenhou');
+    const firstConfig = (record.hands[0] && record.hands[0].config) || {};
+    const startDealer = Number.isInteger(record.startDealer) ? record.startDealer
+      : Number.isInteger(firstConfig.startDealer) ? firstConfig.startDealer
+        : Number.isInteger(firstConfig.dealer) ? firstConfig.dealer : 0;
+    const settled = MJ.rank.finalResult(finalScores, options.rankConfig || 'tenhou', startDealer);
     const totalHands = record.mode === 'hanchan' ? 8 : 4;
     // Match id groups every hand of one game. Train/validation splits must keep
     // all hands of a match on the same side, otherwise near-duplicate positions
@@ -1090,6 +1104,7 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
     record.hands.forEach((hand, index) => {
       const config = hand.config || {};
       const handIndex = Number.isInteger(config.hand) ? config.hand : index;
+      const handStartDealer = Number.isInteger(config.startDealer) ? config.startDealer : startDealer;
       for (let seat = 0; seat < 4; seat++) {
         rows.push({
           v: G.version,
@@ -1097,8 +1112,9 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
           hand: index,
           handIndex,
           seat,
+          startDealer: handStartDealer,
           x: G.encode({ scores: config.scores, seat, honba: config.honba, riichiSticks: config.riichiSticks,
-            handsLeft: Math.max(1, totalHands - handIndex), handIndex, dealer: config.dealer }),
+            handsLeft: Math.max(1, totalHands - handIndex), handIndex, startDealer: handStartDealer, dealer: config.dealer }),
           rank: settled.ranks[seat],
           finalScore: finalScores[seat],
           scoreDelta: finalScores[seat] - (config.scores ? config.scores[seat] : 25000)
@@ -1260,6 +1276,8 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
     survivalBase: 0.027, survivalThreat: 0.075,
     dangerScale: 1.0, dangerPoints: 1.0,
     pushMargin: 100, callDefense: 180, callDeltaRatio: 0.025, callDeltaMin: 20,
+    rankScale: 10, rankEfficiency: 0.5, rankReserve: 1, rankRiichiMargin: 0.05, rankCallMargin: 0.5,
+    rankOrder: 0, rankRiichiEnabled: 0, rankCallEnabled: 0,
   };
   AI.setWeights = function (next) {
     if (next) for (const key of Object.keys(W)) if (Number.isFinite(next[key])) W[key] = next[key];
@@ -1296,6 +1314,54 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
       model }); }
     catch (_) { return 1; }
   }
+
+  // Rank-point EV is a nonlinear function of the score swing, so a single
+  // risk multiplier cannot express "a leader protects a lead" and "a trailer
+  // must push" at the same time. These helpers price the three hand outcomes
+  // (win / deal-in / draw) with the heuristic or a loaded GRP model. When no
+  // standings are available they return null and the legacy raw-point path is
+  // used unchanged.
+  function rankContext(view, model) {
+    if (!MJ.rank || !view || !Array.isArray(view.scores) || view.scores.length !== 4 || view.handsLeft == null) return null;
+    const handsLeft = Math.max(1, Number(view.handsLeft) || 1);
+    const base = { handsLeft, honba: view.honba || 0, riichiSticks: view.riichiSticks || 0,
+      handIndex: view.handIndex, dealer: view.dealer, model };
+    try {
+      return { view, rankConfig: view.rankConfig, seat: view.seat,
+        rest: Math.max(1, handsLeft - 1), base,
+        current: MJ.rank.expectedPoints(view.scores, view.seat, 0, view.rankConfig, base).points };
+    } catch (_) { return null; }
+  }
+  function rankAt(ctx, scores, delta, sticks) {
+    if (!ctx) return null;
+    const after = scores.slice();
+    after[ctx.seat] += Number(delta) || 0;
+    // In the final hand the deal result is the game result: no later hand can
+    // repair a deal-in. Use the deterministic placement instead of pretending
+    // one more hand remains.
+    if (ctx.base.handsLeft <= 1) {
+      try { return MJ.rank.finalResult(after, ctx.rankConfig).points[ctx.seat]; }
+      catch (_) { return null; }
+    }
+    const opts = { ...ctx.base, handsLeft: ctx.rest, riichiSticks: sticks };
+    return MJ.rank.expectedPoints(after, ctx.seat, 0, ctx.rankConfig, opts).points;
+  }
+  // The winning hand ends the deal, so the win/loss/draw outcomes all use one
+  // fewer remaining hand; the current value keeps the full horizon. If we win
+  // we also collect the deposit sticks, otherwise they stay on the table.
+  function rankExpectation(ctx, pWin, winPoints, pLoss, lossPoints) {
+    if (!ctx) return null;
+    const pW = clamp(Number(pWin) || 0, 0, 1);
+    const pL = clamp(Number(pLoss) || 0, 0, 1 - pW);
+    const sticks = ctx.view.riichiSticks || 0;
+    const win = rankAt(ctx, ctx.view.scores, Math.max(0, winPoints) + sticks * 1000, 0);
+    const loss = rankAt(ctx, ctx.view.scores, -Math.max(0, lossPoints), sticks);
+    const draw = rankAt(ctx, ctx.view.scores, 0, sticks);
+    const expected = pW * win + pL * loss + (1 - pW - pL) * draw;
+    return { current: ctx.current, win, loss, draw, expected, gain: round(expected - ctx.current),
+      pWin: round(pW), pLoss: round(pL) };
+  }
+  AI.rankExpectation = rankExpectation;
 
   // Public-information danger model. These are heuristic probabilities, not calibrated frequencies.
   AI.risk = function (t, view, w = AI.weights) {
@@ -1757,6 +1823,10 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
     AI.assertObservation(rawView);
     const view = normalized(rawView), counts = T.countsFromIds(view.hand), evaluate = evaluator(view, w);
     const turns = horizon(view), reds = redCount(view), bias = rankBias(view, options.rankBias !== false, options.rankModel), candidates = [];
+    // Rank EV replaces the raw-score comparison whenever standings are known.
+    // `rankBias: false` stays the legacy raw-point baseline for paired tests.
+    const rctx = options.rankBias !== false ? rankContext(view, options.rankModel) : null;
+    const honbaBonus = (view.honba || 0) * 300;
     const types = [...new Set((view.legalDiscards || view.hand).filter((id) => !(view.forbidden || []).includes(id >> 2)).map((id) => id >> 2))];
     // Fast profile: compute the cheap shanten/ukeire for every discard, then run
     // the full block-shape evaluation only for the best root candidates.
@@ -1796,10 +1866,18 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
       // Folding with duplicate safer tiles reserves safe exits for later turns.
       const reserve = risk.probability < 0.09 ? Math.max(0, copies - 1) * (1 - risk.probability * 8) * 65 : 0;
       const futureLoss = view.threat ? risk.loss * Math.min(3, 0.65 + ev.sh * 0.65) : 0;
-      const expectedNet = ev.grossEV - (risk.loss + futureLoss) * bias;
+      const loss = risk.loss + futureLoss;
+      const expectedNet = ev.grossEV - loss * bias;
+      const rank = rankExpectation(rctx, ev.winProbability, ev.estimatedWinPoints + honbaBonus,
+        risk.probability, loss + honbaBonus);
+      const efficiency = -ev.sh * w.shantenCost + ev.ukeire * w.ukeireGain + ev.shape * w.shapeGain;
+      const legacyScore = view.threat ? expectedNet + reserve + ev.score * 0.08 : ev.score;
+      const score = rank && w.rankOrder ? (rank.expected - rank.current) * w.rankScale + efficiency * w.rankEfficiency + (view.threat ? reserve * w.rankReserve : 0)
+        : legacyScore;
       candidates.push({ ...ev, t, tileId, danger: round(risk.probability * 100), dangerByOpponent: risk.detail,
-        expectedLoss: round(risk.loss + futureLoss), expectedNet, reserve,
-        doraLoss: dora(t, view) + Number(T.isRed(tileId)), score: view.threat ? expectedNet + reserve + ev.score * 0.08 : ev.score });
+        expectedLoss: round(loss), expectedNet, reserve, efficiency: round(efficiency),
+        rankEV: rank ? round(rank.expected) : null, rankGain: rank ? rank.gain : null, rank,
+        doraLoss: dora(t, view) + Number(T.isRed(tileId)), score });
     }
     // In the fast profile the fully evaluated roots stay ahead of the cheap
     // approximations; otherwise a loose acceptance bound could outrank them.
@@ -1816,7 +1894,14 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
         c.improvedUkeire = round(next.improvedUkeire);
         c.winProbability = next.winProbability; c.tenpaiProbability = next.tenpaiProbability;
         c.expectedNet = next.expectedGross - c.expectedLoss;
-        c.score = c.score * 0.35 + next.nextScore * 0.65;
+        if (c.rank && rctx && w.rankOrder) {
+          const rr = rankExpectation(rctx, next.winProbability, c.estimatedWinPoints + honbaBonus,
+            (c.danger || 0) / 100, c.expectedLoss + honbaBonus);
+          if (rr) {
+            c.rank = rr; c.rankEV = round(rr.expected); c.rankGain = rr.gain;
+            c.score = (rr.expected - rr.current) * w.rankScale + c.efficiency * w.rankEfficiency + (view.threat ? c.reserve * w.rankReserve : 0);
+          } else c.score = c.score * 0.35 + next.nextScore * 0.65;
+        } else c.score = c.score * 0.35 + next.nextScore * 0.65;
         c.searched = true;
       }
       candidates.sort((a, b) => b.score - a.score || b.t - a.t);
@@ -1839,7 +1924,11 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
     const opts = callOptions;
     const view = normalized(rawView), turns = horizon(view), ev = evaluator(view, w), bias = rankBias(view, options.rankBias !== false, options.rankModel);
     const counts = T.countsFromIds(view.hand), pass = ev(counts, view.unseen, turns, redCount(view));
-    const alternatives = [{ action: null, label: '見送り', sh: pass.sh, ukeire: pass.ukeire, expectedNet: round(pass.grossEV), winProbability: pass.winProbability }];
+    const rctx = options.rankBias !== false ? rankContext(view, options.rankModel) : null;
+    const honbaBonus = (view.honba || 0) * 300;
+    const passRank = rankExpectation(rctx, pass.winProbability, pass.estimatedWinPoints + honbaBonus, 0, 0);
+    const alternatives = [{ action: null, label: '見送り', sh: pass.sh, ukeire: pass.ukeire, expectedNet: round(pass.grossEV),
+      winProbability: pass.winProbability, rankEV: passRank ? round(passRank.expected) : null, rankExpected: passRank ? passRank.expected : null, rank: passRank }];
     const actions = [];
     if (opts.pon != null) actions.push({ type: 'pon', tile: opts.tile });
     for (const pair of opts.chi || []) actions.push({ type: 'chi', tile: opts.tile, tiles: pair });
@@ -1858,53 +1947,171 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
         const next = lookahead(T.countsFromIds(hand), v, evaluator(v, w), turns, redCount(v), w);
         result = { sh: bestRoute(T.countsFromIds(hand), v.melds.length).sh, ukeire: next.futureUkeire,
           expectedNet: next.expectedGross - (view.threat ? 500 : 120), winProbability: next.winProbability };
-      } else result = AI.analyzeDiscard(v, 'standard', w, { rankBias: options.rankBias !== false }).candidates[0];
+      } else result = AI.analyzeDiscard(v, 'standard', w, { rankBias: options.rankBias !== false, rankModel: options.rankModel }).candidates[0];
       if (!result) continue;
       // Fewer concealed tiles also reduce future defensive exits.
       const defenseCost = view.threat ? (w.callDefense + 80 * v.melds.length) * bias : 0;
+      let rankExpected = result.rank ? result.rank.expected : null;
+      if (rankExpected != null && defenseCost && rctx) {
+        // Price the lost defensive exits in rank points, not raw points.
+        rankExpected -= rctx.current - rankAt(rctx, view.scores, -defenseCost, view.riichiSticks);
+      }
       alternatives.push({ action, label: action.type === 'chi' ? 'チー ' + action.tiles.map(T.label).join('・') : action.type === 'pon' ? 'ポン' : '大明槓',
-        discard: result.tileId, sh: result.sh, ukeire: round(result.ukeire), expectedNet: round(result.expectedNet - defenseCost), winProbability: result.winProbability });
+        discard: result.tileId, sh: result.sh, ukeire: round(result.ukeire), expectedNet: round(result.expectedNet - defenseCost),
+        winProbability: result.winProbability, rankEV: rankExpected == null ? null : round(rankExpected),
+        rankExpected, rank: result.rank || null });
     }
     const baseline = alternatives[0].expectedNet;
-    const calls = alternatives.slice(1).sort((a, b) => b.expectedNet - a.expectedNet);
+    const rankMode = rctx && options.rankBias !== false && w.rankCallEnabled !== 0 && alternatives.every((a) => a.rankExpected != null);
+    const calls = alternatives.slice(1).sort((a, b) => rankMode ? b.rankExpected - a.rankExpected : b.expectedNet - a.expectedNet);
     const best = calls[0];
     const delta = best ? best.expectedNet - baseline : 0;
     // Normalized EV difference stays defined with zero/negative EV; it is NOT a win probability.
     const advantagePercent = best ? 100 * delta / Math.max(100, Math.abs(best.expectedNet), Math.abs(baseline)) : 0;
-    const selected = best && delta > Math.max(w.callDeltaMin, Math.abs(baseline) * w.callDeltaRatio) ? best.action : null;
+    const rankDelta = rankMode && best ? best.rankExpected - alternatives[0].rankExpected : null;
+    const selected = rankMode
+      ? (best && rankDelta > (w.rankCallMargin == null ? 0.05 : w.rankCallMargin) ? best.action : null)
+      : (best && delta > Math.max(w.callDeltaMin, Math.abs(baseline) * w.callDeltaRatio) ? best.action : null);
     return { version: AI.version, kind: 'call', model: 'approximate net EV', unseen: view.unseen.slice(), horizon: turns, rankBias: bias,
+      rankMode: !!rankMode, rankDelta: rankDelta == null ? null : round(rankDelta),
       alternatives, selected, bestCall: best?.action || null, delta: round(delta), advantagePercent: round(advantagePercent),
       percentDefinition: '(bestCallEV - passEV) / max(100, abs(bestCallEV), abs(passEV)) * 100' };
   };
+  // Compare riichi with dama in rank-point space. The deposit is lost on a
+  // draw/deal-in and returned with the sticks on a win; the riichi yaku is
+  // approximated as +1000 points on the winning hand.
+  AI.rankRiichi = function (view, best, w = AI.weights, model) {
+    const ctx = rankContext(view, model);
+    if (!ctx || !best) return { accept: true, reason: 'no-standings' };
+    const honba = (view.honba || 0) * 300;
+    const pWin = clamp(best.winProbability || 0, 0, 1);
+    const pLoss = clamp((best.danger || 0) / 100, 0, 1);
+    const winPoints = Math.max(0, best.estimatedWinPoints || 0) + honba;
+    const lossPoints = Math.max(0, best.expectedLoss || 0) + honba;
+    const dama = rankExpectation(ctx, pWin, winPoints, pLoss, lossPoints);
+    const after = view.scores.slice();
+    after[view.seat] -= 1000;
+    const ctxR = rankContext({ ...view, scores: after }, model);
+    const riichi = rankExpectation(ctxR, clamp(pWin * 1.08, 0, 1), winPoints + 1000,
+      clamp(pLoss * 1.1, 0, 1), lossPoints);
+    const gain = riichi ? riichi.expected - dama.expected : 0;
+    return { accept: gain >= -(w.rankRiichiMargin == null ? 0.05 : w.rankRiichiMargin),
+      reason: 'rank-ev', gain: round(gain), dama, riichi };
+  };
+  AI.winScores = function (view, win, tsumo, loser) {
+    const score = win && win.score;
+    if (!score || !score.payments || !Array.isArray(view.scores) || view.scores.length !== 4) return null;
+    const after = view.scores.slice(), seat = view.seat;
+    let received = 0;
+    for (let s = 0; s < 4; s++) {
+      if (s === seat || (!tsumo && s !== loser)) continue;
+      const base = !tsumo ? score.payments.ron
+        : seat === view.dealer ? score.payments.each
+          : s === view.dealer ? score.payments.fromDealer : score.payments.fromOthers;
+      const pay = (base || 0) + (view.honba || 0) * (tsumo ? 100 : 300);
+      after[s] -= pay; received += pay;
+    }
+    after[seat] += received + (view.riichiSticks || 0) * 1000;
+    return after;
+  };
+  // In the final hand a non-dealer win ends the game. If it still leaves us last,
+  // passing keeps the deal (and the game) alive, so a cheap "cannot rise" win is
+  // declined. A dealer win repeats the hand, so it is always accepted.
+  AI.wantWin = function (view, win, tsumo, loser, options = {}) {
+    if (options.rankBias === false) return { accept: true, reason: 'rank-bias-off' };
+    if (!view || view.handsLeft == null || view.handsLeft > 1 || view.isDealer) return { accept: true, reason: 'not-final-or-dealer' };
+    if (!MJ.rank) return { accept: true, reason: 'no-rank' };
+    const scores = AI.winScores(view, win, tsumo, loser);
+    if (!scores) return { accept: true, reason: 'no-win-score' };
+    let rankAfter;
+    try { rankAfter = MJ.rank.finalResult(scores, view.rankConfig).ranks[view.seat]; }
+    catch (_) { return { accept: true, reason: 'rank-error' }; }
+    return { accept: rankAfter !== 4, reason: rankAfter === 4 ? 'win-keeps-last' : 'win-improves',
+      rankAfter, scores };
+  };
+  // A wait-preserving concealed kan after riichi is already legal (see
+  // `Game.availableKans`). The strategic question is the dora swing: a new kan
+  // dora and ura indicator help us on a win, but the same dora helps every
+  // opponent. While someone is riichi, or too late for a rinshan draw, decline.
+  AI.riichiKanDecision = function (view, kan) {
+    const live = view.liveRemaining == null ? 70 : view.liveRemaining;
+    const threats = (view.opponents || []).filter((o) => o.riichi).length;
+    const dora = (view.doraIndicators || []).length;
+    const reason = threats ? 'threat' : live < 8 ? 'late' : dora >= 5 ? 'max-dora' : 'value';
+    const accept = !threats && live >= 8 && dora < 5;
+    const value = accept ? Math.round(20 + live * 0.3 + dora * 4) : 0;
+    return { accept, value, reason, threats, liveRemaining: live, kan: { kind: kan.kind, tile: kan.tile } };
+  };
+
   AI.create = function (seat, opts = {}) {
     const weights = opts.weights ? { ...AI.weights, ...opts.weights } : AI.weights;
     const useRankBias = opts.rankBias !== false;
     // undefined = use the globally loaded GRP model; null = heuristic rank EV.
     const useRankModel = opts.rankModel;
     const fast = opts.fast === true || opts.level === 'fast';
+    const policy = opts.policy || null;
     return {
-      seat, weights, lastCallAnalysis: null,
-      async wantTsumo() { return true; },
+      seat, weights, lastCallAnalysis: null, lastRiichiDecision: null, lastWinDecision: null, policy,
+      async wantTsumo(view) {
+        AI.assertObservation(view);
+        if (policy && MJ.policy) {
+          const accept = await MJ.policy.chooseTsumo(policy, view);
+          this.lastWinDecision = { accept, reason: 'policy' };
+          return accept;
+        }
+        this.lastWinDecision = AI.wantWin(view, view && view.win, true, null,
+          { rankBias: useRankBias, rankModel: useRankModel });
+        return this.lastWinDecision.accept;
+      },
       async chooseDiscard(view) {
         AI.assertObservation(view);
         if (view.riichi) return { tileId: view.drawnTile, riichi: false, analysis: { version: AI.version, forced: true } };
+        if (policy && MJ.policy) {
+          const decision = await MJ.policy.chooseDiscard(policy, view);
+          if (decision) {
+            const tileId = pickId(view.hand, decision.tile, view.drawnTile);
+            if (tileId != null) return { tileId, riichi: decision.riichi,
+              analysis: { version: AI.version, policy: true, model: 'obs-v1-resnet', probabilities: decision.probabilities } };
+          }
+        }
         const analysis = AI.analyzeDiscard(view, opts.level || 'strong', weights,
           { rankBias: useRankBias, rankModel: useRankModel, fast, rootCandidates: opts.rootCandidates }), best = analysis.candidates[0];
         const margin = weights.pushMargin * rankBias(view, useRankBias, useRankModel);
-        const riichi = view.menzen && best.sh === 0 && !best.furiten && view.score >= 1000 && view.liveRemaining >= 4 && (!view.threat || best.expectedNet > margin);
+        let riichi = view.menzen && best.sh === 0 && !best.furiten && view.score >= 1000 && view.liveRemaining >= 4 && (!view.threat || best.expectedNet > margin);
+        if (riichi && useRankBias && weights.rankRiichiEnabled !== 0) {
+          this.lastRiichiDecision = AI.rankRiichi(view, best, weights, useRankModel);
+          riichi = this.lastRiichiDecision.accept;
+        }
         return { tileId: best.tileId, riichi, analysis };
       },
       async wantCall(view, options) {
         AI.assertObservation(view);
         this.lastCallAnalysis = null;
         if (!options || (!options.ron && options.pon == null && options.kan == null && !(options.chi || []).length)) return null;
-        if (options.ron) return { type: 'ron' };
+        if (policy && MJ.policy) {
+          const action = await MJ.policy.chooseCall(policy, view, options);
+          this.lastCallAnalysis = { version: AI.version, kind: 'call', policy: true, selected: action };
+          return action;
+        }
+        if (options.ron) {
+          this.lastWinDecision = AI.wantWin(view, options.win || view.win, false,
+            view.callFrom != null ? view.callFrom : options.from,
+            { rankBias: useRankBias, rankModel: useRankModel });
+          return this.lastWinDecision.accept ? { type: 'ron' } : null;
+        }
         if (view.riichi) return null;
         this.lastCallAnalysis = AI.analyzeCall(view, options, weights, { rankBias: useRankBias, rankModel: useRankModel });
         return this.lastCallAnalysis.selected;
       },
       async wantKan(view, kans) {
         AI.assertObservation(view);
+        if (!Array.isArray(kans) || !kans.length) return null;
+        if (view.riichi) {
+          const ankan = kans.find((k) => k.kind === 'ankan');
+          if (!ankan) return null;
+          this.lastKanDecision = AI.riichiKanDecision(view, ankan);
+          return this.lastKanDecision.accept ? ankan : null;
+        }
         if (view.threat || view.liveRemaining < 8) return null;
         const c = T.countsFromIds(view.hand), base = bestRoute(c, view.melds.length).sh;
         return kans.find((k) => { const after = c.slice(); after[k.tile] -= k.kind === 'ankan' ? 4 : 1;
@@ -1942,6 +2149,51 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
     return out;
   };
 
+  // Runtime rule switches. `riichiAnkan` follows the common Tenhou rule by
+  // default: a concealed kan is legal after riichi only while the wait set is
+  // unchanged. "strict" additionally requires every winning decomposition to
+  // use the original triplet. "none" disables riichi ankan entirely.
+  const RIICHI_ANKAN_MODES = ['wait', 'strict', 'none'];
+  const DEFAULT_RULES = { riichiAnkan: 'wait', startDealer: 'random' };
+  const hashSeed = (text) => {
+    let h = 2166136261;
+    for (let i = 0; i < text.length; i++) { h ^= text.charCodeAt(i); h = Math.imul(h, 16777619); }
+    return h >>> 0;
+  };
+  const seedToUint = (seed) => Number.isFinite(seed) ? seed >>> 0 : hashSeed(String(seed == null ? 0 : seed));
+  function dealerRng(seed) {
+    let a = seedToUint(seed);
+    return function () {
+      a |= 0; a = (a + 0x6d2b79f5) | 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  const normalizeRules = (rules) => {
+    const out = Object.assign({}, DEFAULT_RULES, rules || {});
+    if (!RIICHI_ANKAN_MODES.includes(out.riichiAnkan)) throw new Error('Invalid rules.riichiAnkan: ' + out.riichiAnkan);
+    if (!(out.startDealer === 'random' || (Number.isInteger(out.startDealer) && out.startDealer >= 0 && out.startDealer <= 3))) {
+      throw new Error('Invalid rules.startDealer: ' + out.startDealer);
+    }
+    return out;
+  };
+  // A separate RNG stream from the wall: adding this rule never changes an
+  // existing deal for a fixed seed.
+  const resolveStartDealer = (setting, seed) => {
+    if (Number.isInteger(setting) && setting >= 0 && setting <= 3) return setting;
+    return Math.floor(dealerRng(String(seed == null ? 0 : seed) + ':dealer')() * 4);
+  };
+  const resolveSeating = (config, seed) => {
+    const settings = config || {};
+    const rules = normalizeRules(settings.rules);
+    const startDealer = Number.isInteger(settings.startDealer) ? settings.startDealer
+      : Number.isInteger(settings.dealer) ? settings.dealer
+        : resolveStartDealer(rules.startDealer, seed);
+    const dealer = Number.isInteger(settings.dealer) ? settings.dealer : startDealer;
+    return { rules, startDealer, dealer };
+  };
+
   function Game(config) {
     this.onEvent = config.onEvent || (() => {});
     this.onUpdate = config.onUpdate || (() => {});
@@ -1964,11 +2216,13 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
     this.onEvent(msg, data);
   };
   Game.prototype.setup = function (config) {
-    Object.assign(this, { roundWind: config.roundWind, dealer: config.dealer, honba: config.honba || 0,
+    const seating = resolveSeating(config, config.seed);
+    Object.assign(this, { roundWind: config.roundWind, dealer: seating.dealer, startDealer: seating.startDealer,
+      rules: seating.rules, honba: config.honba || 0,
       riichiSticks: config.riichiSticks || 0, turnCount: 0, anyCall: false, ended: false, result: null,
-      wallIndex: 0, liveEnd: 122, rinshanIndex: 0, doraRevealed: 1, currentSeat: config.dealer,
-      handIndex: config.hand != null ? config.hand : 0, mode: config.mode || 'tonpu',
-      rankConfig: config.rankConfig });
+      wallIndex: 0, liveEnd: 122, rinshanIndex: 0, doraRevealed: 1, currentSeat: seating.dealer,
+      handIndex: Number.isInteger(config.hand) ? config.hand : Number.isInteger(config.handIndex) ? config.handIndex : 0,
+      mode: config.mode || 'tonpu', rankConfig: config.rankConfig });
     this.handsLeft = Math.max(1, (this.mode === 'hanchan' ? 8 : 4) - this.handIndex);
     this.players = Array.from({ length: 4 }, (_, seat) => ({ seat, hand: [], melds: [], discards: [], river: [],
       discardHistory: [], score: config.scores[seat], riichi: false, doubleRiichi: false, ippatsu: false,
@@ -1986,7 +2240,9 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
     for (let i = 0; i < 4; i++) this.players[(this.dealer + i) % 4].hand.push(this.liveWall[this.wallIndex++]);
     for (const p of this.players) p.hand = sortHand(p.hand);
     this.syncDora();
-    this.recording = { config: clone(config), wall: this.wall.slice(), initialHands: this.players.map((p) => p.hand.slice()), events: [] };
+    const recorded = Object.assign({}, config, { dealer: this.dealer, startDealer: this.startDealer,
+      hand: this.handIndex, handIndex: this.handIndex, rules: clone(this.rules) });
+    this.recording = { config: clone(recorded), wall: this.wall.slice(), initialHands: this.players.map((p) => p.hand.slice()), events: [] };
     delete this.recording.config.wall;
     this.record('start', { scores: config.scores, doraIndicators: this.doraIndicators });
   };
@@ -2033,7 +2289,9 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
       discards: this.players.map((x) => x.discards.slice()), doraIndicators: this.doraIndicators.slice(),
       scores: this.players.map((x) => x.score), seatWinds: this.players.map((_, s) => this.seatWindOf(s)),
       roundWind: this.roundWind, seatWind: this.seatWindOf(seat),
-      dealer: this.dealer, honba: this.honba, riichiSticks: this.riichiSticks,
+      dealer: this.dealer, startDealer: this.startDealer, seatOrder: (seat - this.startDealer + 4) % 4,
+      roundNumber: (this.handIndex % 4) + 1,
+      honba: this.honba, riichiSticks: this.riichiSticks,
       handIndex: this.handIndex, mode: this.mode, handsLeft: this.handsLeft, rankConfig: this.rankConfig,
       isDealer: seat === this.dealer, riichi: p.riichi, menzen: !p.melds.some((m) => m.open),
       liveRemaining: this.liveRemaining(), unseen: this.computeUnseen(seat), opponents,
@@ -2082,7 +2340,7 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
     const p = this.players[seat], type = tileId >> 2, counts = T.countsFromIds(p.hand);
     const opts = { tile: type, from, ron: false, pon: null, kan: null, chi: [] };
     const win = this.evalWin(seat, tileId, { tsumo: false, chankan: !!robKan, houtei: !robKan && !this.lastDrawRinshan && this.liveRemaining() === 0 });
-    if (win && !this.isFuriten(seat) && (robKan !== 'ankan' || win.ev.kokushi)) opts.ron = true;
+    if (win && !this.isFuriten(seat) && (robKan !== 'ankan' || win.ev.kokushi)) { opts.ron = true; opts.win = win; }
     if (!robKan && !p.riichi && this.liveRemaining() > 0) {
       if (counts[type] >= 2 && p.hand.some((id) => (id >> 2) !== type)) opts.pon = type;
       if (counts[type] >= 3 && this.rinshanIndex < 4) opts.kan = type;
@@ -2110,17 +2368,23 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
   };
   Game.prototype.availableKans = function (seat) {
     const p = this.players[seat], counts = T.countsFromIds(p.hand), out = [];
+    const riichiAnkan = this.rules ? this.rules.riichiAnkan : 'wait';
     if (this.rinshanIndex >= 4 || this.liveRemaining() < 1) return out;
     for (let t = 0; t < 34; t++) if (counts[t] === 4) {
       if (p.riichi) {
-        if ((p.drawnTile >> 2) !== t) continue;
+        if (riichiAnkan === 'none') continue;
+        // Only the tile just drawn may complete the quad; using a physical
+        // fourth copy that was already in hand ("okuri-kan") is not allowed.
+        if (p.drawnTile == null || (p.drawnTile >> 2) !== t) continue;
         const before = p.hand.filter((id) => id !== p.drawnTile);
         const after = p.hand.filter((id) => (id >> 2) !== t);
         const waits = this.waits(seat, before);
         if (JSON.stringify(waits) !== JSON.stringify(this.waits(seat, after, p.melds.length + 1))) continue;
-        // Every winning decomposition must use the original three tiles as a triplet.
-        const c = T.countsFromIds(before);
-        if (waits.some((w) => { c[w]++; const ds = MJ.agari.decompose(c); c[w]--; return ds.some((d) => !d.sets.some((s) => s.kind === 'trip' && s.type === t)); })) continue;
+        if (riichiAnkan === 'strict') {
+          // Every winning decomposition must use the original three tiles as a triplet.
+          const c = T.countsFromIds(before);
+          if (waits.some((w) => { c[w]++; const ds = MJ.agari.decompose(c); c[w]--; return ds.some((d) => !d.sets.some((s) => s.kind === 'trip' && s.type === t)); })) continue;
+        }
       }
       out.push({ kind: 'ankan', tile: t });
     }
@@ -2237,7 +2501,7 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
       agent.lastCallAnalysis = null;
       // Every seat goes through the same agent call, even with no legal call.
       // The UI paces the agent itself, so the delay does not disclose options.
-      const action = await agent.wantCall(this.getObservation(seat, { callTile: tileId, callType: tileId >> 2, callFrom: from, isCallDecision: true }), opts);
+      const action = await agent.wantCall(this.getObservation(seat, { callTile: tileId, callType: tileId >> 2, callFrom: from, isCallDecision: true, win: opts && opts.ron ? opts.win : undefined }), opts);
       if (this.cancelled) return null;
       if (!opts) continue;
       this.record('response', { seat, from, tileId, robKan: robKan || null, action, options: opts, analysis: agent.lastCallAnalysis });
@@ -2279,7 +2543,9 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
         }
         if (this.cancelled) return null;
         const kans = this.availableKans(cur);
-        if (kans.length) {
+        // Riichi seats always pass through the same (possibly empty) kan check,
+        // so the duration of the check cannot disclose a concealed kan option.
+        if (kans.length || p.riichi) {
           const k = await this.agents[cur].wantKan(this.getObservation(cur, { kans }), kans);
           if (this.cancelled) return null;
           if (k) {
@@ -2321,6 +2587,8 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
   };
   MJ.Game = Game;
   MJ.sortHand = sortHand;
+  MJ.rules = { version: 'rules-v1', DEFAULT_RULES, RIICHI_ANKAN_MODES, normalize: normalizeRules,
+    resolveStartDealer, resolveSeating };
   MJ.match = {
     advance(state, result, scores) {
       const abort = result.type === 'draw' && result.reason !== 'exhaustive';
@@ -2362,13 +2630,21 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
   const pass = () => ({ type: 'pass' });
   const isPass = (action) => action == null || action === false || (typeof action === 'object' && action.type === 'pass');
 
-  function normalizeConfig(config) {
-    return Object.assign({ roundWind: 27, dealer: 0, honba: 0, riichiSticks: 0,
-      scores: [25000, 25000, 25000, 25000] }, config || {});
+  function normalizeConfig(config, seed) {
+    const settings = config || {};
+    // Resolve the match's East-1 dealer separately from the wall RNG. An
+    // explicit `dealer` (tests/goldens) always wins; otherwise the rule switch
+    // decides, and a missing dealer is the first hand's East-1 dealer.
+    const seating = MJ.rules.resolveSeating(settings, seed);
+    return Object.assign({ roundWind: 27, honba: 0, riichiSticks: 0,
+      scores: [25000, 25000, 25000, 25000] }, settings,
+      { rules: seating.rules, startDealer: seating.startDealer, dealer: seating.dealer,
+        hand: Number.isInteger(settings.hand) ? settings.hand : Number.isInteger(settings.handIndex) ? settings.handIndex : 0,
+        seed });
   }
 
   function Core(config, seed) {
-    this.config = normalizeConfig(config);
+    this.config = normalizeConfig(config, seed);
     this.seed = seed;
     this.rng = C.rng(seed);
     this.wall = this.config.wall ? this.config.wall.slice() : T.buildWall(this.rng);
@@ -2427,6 +2703,10 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
         return core._deferred();
       },
       wantKan(view, kans) {
+        // The game always performs the kan check for a riichi seat (even with an
+        // empty list) so timing does not reveal hidden options; an empty check is
+        // not a decision.
+        if (!kans || !kans.length) return Promise.resolve(null);
         core._pend(seat, 'kan', view, kanActions(kans));
         return core._deferred();
       }
@@ -2562,9 +2842,10 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
   const R = MJ.record = {
     create(mode, level) {
       return { format: 'suitaku-riichi', version: 1, createdAt: new Date().toISOString(), mode, ai: level,
+        startDealer: null,
         rules: { players: 4, initialScore: 25000, redFives: 3, openTanyao: true, ron: 'atamahane',
           dealerTenpaiRepeat: true, agariYame: false, extension: false, kuikae: false,
-          nineTerminals: false, nagashiMangan: false }, hands: [], annotations: [] };
+          nineTerminals: false, nagashiMangan: false, riichiAnkan: 'wait', startDealer: 'random' }, hands: [], annotations: [] };
     },
     // A record that is still being played. The wall, the other seats' initial
     // hands, their draws and their call options are removed before anything is
@@ -2623,6 +2904,7 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
       for (const h of data.hands) {
         if (!h || !h.config || !nonnegative(h.config.honba) || !nonnegative(h.config.riichiSticks)) throw new Error('本場・供託が不正です。');
         if (!ids(h.wall) || new Set(h.wall).size !== 136 || !h.config || !Number.isInteger(h.config.dealer) || h.config.dealer < 0 || h.config.dealer > 3 || ![27, 28].includes(h.config.roundWind) || !Array.isArray(h.config.scores) || h.config.scores.length !== 4 || !h.config.scores.every(Number.isFinite) || !Array.isArray(h.initialHands) || h.initialHands.length !== 4 || !h.initialHands.every(ids) || !Array.isArray(h.events) || h.events.length > 2000) throw new Error('牌譜の局データが不正です。');
+        if (h.config.startDealer != null && (!Number.isInteger(h.config.startDealer) || h.config.startDealer < 0 || h.config.startDealer > 3)) throw new Error('起家が不正です。');
         for (const e of h.events) {
           if (!e || !['start', 'draw', 'discard', 'response', 'call', 'kan', 'dora', 'riichi', 'end'].includes(e.type)) throw new Error('牌譜のイベントが不正です。');
           if (e.seat != null && (!Number.isInteger(e.seat) || e.seat < 0 || e.seat > 3)) throw new Error('席番号が不正です。');
@@ -2681,7 +2963,8 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
     text(data) {
       const T = MJ.tiles, lines = ['翠卓 牌譜 v1', data.createdAt, data.mode === 'hanchan' ? '半荘' : '東風'];
       data.hands.forEach((h, i) => {
-        lines.push(`\n局 #${i + 1} ${h.config.roundWind === 27 ? '東' : '南'}${h.config.dealer + 1}局 ${h.config.honba || 0}本場`);
+        const handIndex = Number.isInteger(h.config.hand) ? h.config.hand : Number.isInteger(h.config.handIndex) ? h.config.handIndex : i;
+        lines.push(`\n局 #${i + 1} ${handIndex < 4 ? '東' : '南'}${(handIndex % 4) + 1}局 ${h.config.honba || 0}本場`);
         for (const e of h.events) {
           if (e.type === 'discard') lines.push(`[${e.index}] P${e.seat + 1} ${e.tsumogiri ? 'ツモ切り' : '手出し'} ${T.isRed(e.tileId) ? '赤' : ''}${T.label(e.tileId >> 2)}${e.riichi ? ' リーチ宣言' : ''}`);
           else if (e.type === 'draw') lines.push(`[${e.index}] P${e.seat + 1} ${e.rinshan ? '嶺上' : ''}ツモ ${e.hidden ? '?' : T.label(e.tileId >> 2)}`);
@@ -2790,16 +3073,22 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
     const seat = Number.isInteger(options.seat) && options.seat >= 0 && options.seat < 4 ? options.seat : null;
     const maskOtherDraws = !!options.maskOtherDraws && seat != null;
     const events = [];
+    const startDealer = Number.isInteger(record.startDealer) ? record.startDealer
+      : Number.isInteger(record.hands[0] && record.hands[0].config && record.hands[0].config.startDealer) ? record.hands[0].config.startDealer
+        : Number.isInteger(record.hands[0] && record.hands[0].config && record.hands[0].config.dealer) ? record.hands[0].config.dealer : 0;
     events.push({ type: 'start_game', names: options.names || ['P0', 'P1', 'P2', 'P3'],
       rule: { aka: (record.rules && record.rules.redFives) !== 0, kuitan: !!(record.rules && record.rules.openTanyao),
-        atamahane: !record.rules || record.rules.ron !== 'multiple', mode: record.mode || 'tonpu' } });
+        atamahane: !record.rules || record.rules.ron !== 'multiple', mode: record.mode || 'tonpu',
+        start_dealer: startDealer, riichi_ankan: (record.rules && record.rules.riichiAnkan) || 'wait' } });
     record.hands.forEach((hand) => {
       const config = hand.config || {}, start = (hand.events || []).find((e) => e.type === 'start') || {};
       const acceptedRiichi = new Set((hand.events || []).filter((e) => e.type === 'riichi').map((e) => e.seat));
       const initialDora = start.doraIndicators && start.doraIndicators[0];
+      const handIndex = Number.isInteger(config.hand) ? config.hand : Number.isInteger(config.handIndex) ? config.handIndex : 0;
       if (!Array.isArray(hand.initialHands) || hand.initialHands.length !== 4) throw new Error('配牌データが不正です');
-      events.push({ type: 'start_kyoku', bakaze: config.roundWind === 28 ? 'S' : 'E', kyoku: (config.dealer || 0) + 1,
+      events.push({ type: 'start_kyoku', bakaze: handIndex >= 4 ? 'S' : 'E', kyoku: (handIndex % 4) + 1,
         honba: config.honba || 0, kyotaku: config.riichiSticks || 0, oya: config.dealer || 0,
+        start_dealer: startDealer,
         dora_marker: initialDora == null ? null : tileString(initialDora),
         tehais: hand.initialHands.map((ids) => ids.map(tileString)), scores: (config.scores || []).slice() });
       for (const e of hand.events || []) {
@@ -2892,7 +3181,9 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
     flags.push(...ruleDiffs);
     const tenhouSource = options.source === 'tenhou' || rule.source === 'tenhou';
 
-    const hands = rounds.map((round, handIndex) => {
+    const firstDealer = Number.isInteger(rule.start_dealer) ? rule.start_dealer
+      : Number.isInteger(rounds[0].start.oya) ? rounds[0].start.oya : 0;
+    const hands = rounds.map((round, roundIndex) => {
       const pool = createPool();
       const start = round.start;
       if (!Array.isArray(start.tehais) || start.tehais.length !== 4) throw new Error('start_kyoku.tehais が不正です');
@@ -2903,8 +3194,11 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
       const scores = Array.isArray(start.scores) && start.scores.length === 4 ? start.scores.slice() : [25000, 25000, 25000, 25000];
       const bakaze = start.bakaze === 'S' ? 28 : 27;
       if (bakaze === 28) sawSouth = true;
-      const config = { roundWind: bakaze, dealer: start.oya || 0, honba: start.honba || 0,
-        riichiSticks: start.kyotaku || 0, scores, hand: handIndex, mode: rule.mode || 'tonpu' };
+      const kyoku = Number.isInteger(start.kyoku) ? Math.max(1, Math.min(4, start.kyoku)) : ((Number(start.oya) || 0) % 4) + 1;
+      const handIndex = (bakaze === 28 ? 4 : 0) + kyoku - 1;
+      const config = { roundWind: bakaze, dealer: start.oya || 0, startDealer: firstDealer, honba: start.honba || 0,
+        riichiSticks: start.kyotaku || 0, scores, hand: handIndex, handIndex, mode: rule.mode || 'tonpu',
+        rules: { riichiAnkan: rule.riichi_ankan || 'wait', startDealer: firstDealer } };
       const state = {
         hands: initialHands.map((h) => h.slice()), melds: [[], [], [], []], discards: [[], [], [], []],
         dora: start.dora_marker ? [pool.take(start.dora_marker)] : [], draws: [], lastDraw: [null, null, null, null],
@@ -3077,11 +3371,11 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
     const mode = rule.mode === 'hanchan' || sawSouth ? 'hanchan' : 'tonpu';
     const record = {
       format: 'suitaku-riichi', version: 1, createdAt: options.createdAt || new Date().toISOString(),
-      mode, ai: 'imported',
+      mode, ai: 'imported', startDealer: firstDealer,
       rules: { players: 4, initialScore: 25000, redFives: rule.aka === false ? 0 : 3,
         openTanyao: rule.kuitan !== false, ron: rule.atamahane === false ? 'multiple' : 'atamahane',
         dealerTenpaiRepeat: true, agariYame: false, extension: false, kuikae: false,
-        nineTerminals: false, nagashiMangan: false },
+        nineTerminals: false, nagashiMangan: false, riichiAnkan: rule.riichi_ankan || 'wait', startDealer: firstDealer },
       hands, annotations: [], finalScores: hands[hands.length - 1].finalScores.slice(), finished: true,
       mjai: { rule: clone(rule), flags: [...new Set(flags)], source: options.source || 'mjai' }
     };
@@ -3525,9 +3819,13 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
   function globals(obs) {
     const scores = obs.scores || [25000, 25000, 25000, 25000];
     const seat = obs.seat;
+    // Score and riichi slots follow the match's starting seat order (0 = 起家),
+    // not absolute seat numbers. startDealer defaults to 0 for older records.
+    const startDealer = Number.isInteger(obs.startDealer) ? obs.startDealer : 0;
+    const seatAt = (slot) => (startDealer + slot) % 4;
     const values = [];
-    for (let s = 0; s < 4; s++) values.push((scores[s] - 25000) / 100000);
-    for (let s = 0; s < 4; s++) values.push((scores[seat] - scores[s]) / 100000);
+    for (let slot = 0; slot < 4; slot++) values.push((scores[seatAt(slot)] - 25000) / 100000);
+    for (let slot = 0; slot < 4; slot++) values.push((scores[seat] - scores[seatAt(slot)]) / 100000);
     const wind = obs.seatWind != null ? obs.seatWind : (obs.seatWinds || [27, 28, 29, 30])[seat];
     for (let w = 0; w < 4; w++) values.push(wind === 27 + w ? 1 : 0);
     values.push(obs.isDealer ? 1 : 0);
@@ -3538,7 +3836,7 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
     const riichi = [0, 0, 0, 0];
     if (obs.riichi) riichi[seat] = 1;
     for (const o of obs.opponents || []) if (o.riichi) riichi[o.seat] = 1;
-    for (let s = 0; s < 4; s++) values.push(riichi[s]);
+    for (let slot = 0; slot < 4; slot++) values.push(riichi[seatAt(slot)]);
     values.push(obs.threat ? 1 : 0, obs.furiten ? 1 : 0);
     for (let i = 0; i < 3; i++) {
       const o = (obs.opponents || []).find((x) => x.seat === (seat + i + 1) % 4);
@@ -3578,11 +3876,17 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
 
   // Deterministic supervised samples from a 翠卓 record. The observation is taken
   // immediately before the action, so opponent hands and the wall are never encoded.
+  // External mjlog conversions record calls as `call` events and do not contain
+  // `response` events for the seats that passed. For those records the call/pass
+  // decisions are reconstructed from the legal options and the next recorded event.
   F.dataset = function (record, opts = {}) {
     if (!record || !Array.isArray(record.hands)) throw new Error('features.dataset requires a 翠卓 record');
     const samples = [], limit = Number.isFinite(opts.limit) ? opts.limit : Infinity;
+    const synthesize = opts.syntheticCalls !== false;
+    const match = record.matchId || record.source || record.createdAt || 'match';
     for (let h = 0; h < record.hands.length; h++) {
       const hand = record.hands[h];
+      const hasResponses = hand.events.some((e) => e.type === 'response');
       for (let i = 0; i < hand.events.length; i++) {
         const event = hand.events[i];
         if (event.type === 'end' && event.result && event.result.type === 'win' && event.result.tsumo) {
@@ -3591,7 +3895,7 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
           const obs = game.getObservation(seat);
           obs.furiten = game.isFuriten(seat);
           samples.push({ hand: h, eventIndex: i, seat, x: F.encode(obs),
-            label: { kind: 'tsumo', tile: event.result.winTile >> 2 },
+            label: { kind: 'tsumo', tile: event.result.winTile >> 2 }, match,
             meta: { version: F.version, hand: h, eventIndex: i, seat, turn: event.turn == null ? game.turnCount : event.turn, kind: 'end', riichi: !!game.players[seat].riichi } });
           if (samples.length >= limit) return samples;
           continue;
@@ -3606,18 +3910,43 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
         obs.furiten = game.isFuriten(seat);
         const x = F.encode(obs);
         const label = labelOf(event, event.options);
-        if (event.type === 'discard') label.forced = !!game.players[seat].riichi;
-        samples.push({ hand: h, eventIndex: i, seat, x, label,
+        if (event.type === 'discard') { label.forced = !!game.players[seat].riichi; label.canRiichi = game.canRiichi(seat); }
+        samples.push({ hand: h, eventIndex: i, seat, x, label, match,
           meta: { version: F.version, hand: h, eventIndex: i, seat, turn: event.turn == null ? game.turnCount : event.turn,
             kind: event.type, riichi: !!game.players[seat].riichi } });
         if (samples.length >= limit) return samples;
+        if (event.type === 'discard' && synthesize && !hasResponses) {
+          const after = MJ.record.snapshot(hand, i);
+          const next = hand.events[i + 1];
+          const called = next && next.type === 'call' && next.from === seat ? next : null;
+          const ronned = next && next.type === 'end' && next.result && next.result.type === 'win' &&
+            !next.result.tsumo && next.result.loser === seat ? next : null;
+          for (let dist = 1; dist < 4; dist++) {
+            const caller = (seat + dist) % 4;
+            const options = after.callOptions(caller, seat, event.tileId);
+            if (!options) continue;
+            const action = called && called.seat === caller ? called.action
+              : ronned && ronned.result.winner === caller ? { type: 'ron' } : null;
+            const callObs = after.getObservation(caller, { callTile: event.tileId, callType: event.tileId >> 2,
+              callFrom: seat, isCallDecision: true, win: options.ron ? options.win : undefined });
+            callObs.furiten = after.isFuriten(caller);
+            const callLabel = action ? (action.type === 'ron' ? { kind: 'ron' }
+              : action.type === 'chi' ? { kind: 'chi', tile: event.tileId >> 2, tiles: action.tiles.slice() }
+                : { kind: action.type, tile: event.tileId >> 2 }) : { kind: 'pass' };
+            samples.push({ hand: h, eventIndex: i, seat: caller, x: F.encode(callObs), label: callLabel, match,
+              meta: { version: F.version, hand: h, eventIndex: i, seat: caller, turn: event.turn == null ? after.turnCount : event.turn,
+                kind: 'response', riichi: !!after.players[caller].riichi, synthetic: true, ron: !!options.ron,
+                pon: options.pon != null, kan: options.kan != null, chi: (options.chi || []).length } });
+            if (samples.length >= limit) return samples;
+          }
+        }
       }
     }
     return samples;
   };
 
   F.toJSONL = function (samples) {
-    return samples.map((s) => JSON.stringify({ v: s.x.version, hand: s.hand, event: s.eventIndex, seat: s.seat,
+    return samples.map((s) => JSON.stringify({ v: s.x.version, match: s.match, hand: s.hand, event: s.eventIndex, seat: s.seat,
       channels: s.x.channelNames, globals: s.x.globalNames, shape: s.x.shape,
       x: Array.from(s.x.data), label: s.label, meta: s.meta })).join('\n') + '\n';
   };
@@ -3689,7 +4018,8 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
   const WINDS = ['東', '南', '西', '北'];
   const escape = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const ui = MJ.ui = { humanSeat: 0, mode: null, running: false, fast: false, token: 0,
-    record: null, review: null, pending: null, discardResolve: null, riichiWanted: false, level: 'strong', aiWeights: null, grpModel: null, rankConfig: 'tenhou' };
+    record: null, review: null, pending: null, discardResolve: null, riichiWanted: false, level: 'strong', aiWeights: null, grpModel: null, rankConfig: 'tenhou',
+    startDealer: 'random', matchSeed: null, riichiAnkan: 'wait', autoDiscardWaited: false };
   // The raw game object stays in this closure. It is exposed only to automated tests,
   // never as a normal console-accessible property in the built page.
   let currentGame = null;
@@ -3761,6 +4091,7 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
     el.classList.toggle('active', obs.currentSeat === seat && !obs.ended);
     const head = document.createElement('div'); head.className = 'seat-head';
     head.innerHTML = `<span class="wind">${WINDS[obs.seatWinds[seat] - 27]}</span><span>${NAMES[seat]}</span><span class="score">${p.score.toLocaleString()}</span>` +
+      (p.isDealer ? '<span class="dealer-mark">親</span>' : '') +
       (p.riichi ? '<span class="riichi-flag">● リーチ</span>' : '');
     const row = document.createElement('div'); row.className = 'hand-row';
     const reveal = p.own || !!obs.revealAll || (obs.ended && obs.result && (obs.result.winner === seat || (obs.result.tenpai || []).includes(seat)));
@@ -3866,7 +4197,7 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
       const id = obs.doraIndicators[i];
       di.appendChild(tileEl(id == null ? 0 : id >> 2, { small: true, back: id == null, red: id != null && T.isRed(id) }));
     }
-    $('center').innerHTML = `<span class="center-tag">${ui.review ? 'REPLAY' : liveRecord && liveRecord.mode === 'hanchan' ? 'HANCHAN' : 'TONPU'}</span><div class="center-round">${WINDS[obs.roundWind - 27]} ${obs.dealer + 1} 局</div><div class="center-remaining">${obs.liveRemaining}<small>枚</small></div><div class="info-line"><span>${obs.honba} 本場</span><span>供託 ${obs.riichiSticks}</span></div>`;
+    $('center').innerHTML = `<span class="center-tag">${ui.review ? 'REPLAY' : liveRecord && liveRecord.mode === 'hanchan' ? 'HANCHAN' : 'TONPU'}</span><div class="center-round">${WINDS[obs.roundWind - 27]} ${obs.roundNumber} 局</div><div class="center-remaining">${obs.liveRemaining}<small>枚</small></div><div class="info-line"><span>${obs.honba} 本場</span><span>供託 ${obs.riichiSticks}</span></div>`;
     for (let s = 0; s < 4; s++) { renderSeat(s, obs, game); renderRiver(s, obs); }
     guide(obs, game); animateDiscard(obs);
   }
@@ -3918,8 +4249,11 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
         if (token !== ui.token) return Promise.resolve({ tileId: view.hand[0] });
         if (view.riichi) {
           ui.mode = 'auto-discard'; ui.discardResolve = null;
-          $('controls').innerHTML = '<span class="hint">リーチ中 — 自動ツモ切り</span>';
-          await new Promise((resolve) => setTimeout(resolve, MJ.pacing.autoDiscardDelay(ui.fast)));
+          if (!ui.autoDiscardWaited) {
+            $('controls').innerHTML = '<span class="hint">リーチ中 — 自動ツモ切り</span>';
+            await new Promise((resolve) => setTimeout(resolve, MJ.pacing.autoDiscardDelay(ui.fast)));
+          }
+          ui.autoDiscardWaited = false;
           if (token === ui.token) ui.mode = null;
           return { tileId: view.drawnTile, riichi: false, analysis: { forced: true, automatic: true } };
         }
@@ -3939,9 +4273,24 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
         choices.push({ label: 'パス', value: null });
         return askChoice(`${NAMES[opts.from]} の ${T.label(opts.tile)}`, choices, token);
       },
-      wantKan(view, kans) {
-        if (view.riichi) return Promise.resolve(null);
-        return askChoice('槓を選択できます', [...kans.map((k) => ({ label: `${k.kind === 'ankan' ? '暗槓' : '加槓'} ${T.label(k.tile)}`, value: k })), { label: 'パス', value: null }], token);
+      async wantKan(view, kans) {
+        if (!Array.isArray(kans) || !kans.length) return null;
+        const options = [...kans.map((k) => ({ label: `${k.kind === 'ankan' ? '暗槓' : '加槓'} ${T.label(k.tile)}`, value: k })), { label: 'ツモ切り', value: null }];
+        if (!view.riichi) return askChoice('槓を選択できます', options, token);
+        // Riichi ankan is only legal when the wait set is unchanged. Show the
+        // choice after the same fixed delay the automatic discard would use, so
+        // the presence of a kan option does not change the visible timing.
+        if (!kans.some((k) => k.kind === 'ankan')) return null;
+        ui.mode = 'auto-discard';
+        $('controls').innerHTML = '<span class="hint">リーチ中 — 暗槓できます</span>';
+        await new Promise((resolve) => setTimeout(resolve, MJ.pacing.autoDiscardDelay(ui.fast)));
+        if (token !== ui.token) { ui.autoDiscardWaited = false; return null; }
+        ui.autoDiscardWaited = true;
+        const choice = await askChoice('暗槓できます（待ちは変わりません）', options, token);
+        // A chosen kan leads to a fresh rinshan draw, which must wait again;
+        // a pass falls through to the already-delayed automatic discard.
+        if (choice) ui.autoDiscardWaited = false;
+        return choice;
       }
     };
   }
@@ -4074,18 +4423,27 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
   async function startMatch(mode) {
     stop(); const token = ui.token;
     ui.running = true; ui.fast = $('speed-fast').checked; ui.record = MJ.record.create(mode, ui.level);
+    const rules = MJ.rules.normalize({ riichiAnkan: ui.riichiAnkan || 'wait', startDealer: ui.startDealer != null ? ui.startDealer : 'random' });
+    const seed = Number.isInteger(ui.matchSeed) ? (ui.matchSeed >>> 0) : ((Date.now() ^ Math.floor(Math.random() * 0xffffffff)) >>> 0);
+    const startDealer = MJ.rules.resolveStartDealer(rules.startDealer, seed);
+    liveRecord.rules = Object.assign({}, liveRecord.rules, rules);
+    liveRecord.startDealer = startDealer; liveRecord.seed = seed;
+    ui.autoDiscardWaited = false;
     ui.animationKey = null; $('log').innerHTML = ''; $('match-label').textContent = `${mode === 'hanchan' ? '半荘戦' : '東風戦'} / ${ui.level === 'strong' ? '思考型AI' : '標準AI'}`;
-    let state = { hand: 0, dealer: 0, honba: 0, mode }, scores = [25000, 25000, 25000, 25000], sticks = 0;
+    let state = { hand: 0, dealer: startDealer, startDealer, honba: 0, mode }, scores = [25000, 25000, 25000, 25000], sticks = 0;
     try {
       while (!state.ended && token === ui.token) {
         const game = new MJ.Game({ agents: [humanAgent(token), pacedAI(1, token), pacedAI(2, token), pacedAI(3, token)],
+          rng: MJ.core.rng(seed + ':hand:' + state.hand),
           // Every seat gets the same fixed check delay, whether or not it had a
           // legal call, so the pause does not disclose hidden call options.
           onCheck: () => new Promise((resolve) => setTimeout(resolve, MJ.pacing.checkDelay(ui.fast))),
           onUpdate: () => { if (token === ui.token) render(game); }, onEvent: (msg, data) => { if (token === ui.token) { appendLog(msg, data); if (data?.type) MJ.audio.play(data.type); } } });
         currentGame = game; ui.animationKey = null; ui.waitingResult = false;
-        appendLog(`── ${state.hand < 4 ? '東' : '南'}${state.dealer + 1}局 ${state.honba}本場 ──`);
-        const playing = game.playHand({ roundWind: 27 + Math.floor(state.hand / 4), dealer: state.dealer, honba: state.honba, riichiSticks: sticks, scores: scores.slice(), hand: state.hand, mode: state.mode, rankConfig: ui.rankConfig });
+        appendLog(`── ${state.hand < 4 ? '東' : '南'}${(state.hand % 4) + 1}局 ${state.honba}本場 ──`);
+        const playing = game.playHand({ roundWind: 27 + Math.floor(state.hand / 4), dealer: state.dealer,
+          startDealer, rules, seed: seed + ':hand:' + state.hand,
+          honba: state.honba, riichiSticks: sticks, scores: scores.slice(), hand: state.hand, mode: state.mode, rankConfig: ui.rankConfig });
         liveRecord.hands.push(game.recording);
         const res = await playing;
         if (token !== ui.token || !res) return;
@@ -4096,9 +4454,9 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
         state = MJ.match.advance(state, res, scores);
       }
       if (token !== ui.token) return;
-      const ranked = scores.map((score, seat) => ({ score, seat })).sort((a, b) => b.score - a.score || a.seat - b.seat);
+      const ranked = MJ.rank.order(scores, state.startDealer).map((seat) => ({ score: scores[seat], seat }));
       if (sticks) { scores[ranked[0].seat] += sticks * 1000; ranked[0].score += sticks * 1000; }
-      const settled = MJ.rank.finalResult(scores, ui.rankConfig);
+      const settled = MJ.rank.finalResult(scores, ui.rankConfig, state.startDealer);
       liveRecord.finalScores = scores; liveRecord.finalRankPoints = settled.points;
       liveRecord.rankConfig = { name: settled.config.name, uma: settled.config.uma, startScore: settled.config.startScore,
         returnScore: settled.config.returnScore, scoreUnit: settled.config.scoreUnit, scoreWeight: settled.config.scoreWeight };
@@ -4199,7 +4557,9 @@ select,textarea { color:#dfe8dc; background:#132c2b; padding:11px; border:1px so
     renderTimeline(h);
     const root = $('review-controls'); root.classList.remove('hidden'); root.innerHTML = '<div class="section-label">REPLAY <span>牌譜検討</span></div>';
     const select = document.createElement('select');
-    ui.record.hands.forEach((hand, i) => { const option = document.createElement('option'); option.value = i; option.textContent = `#${i + 1} ${WINDS[hand.config.roundWind - 27]}${hand.config.dealer + 1}局 ${hand.config.honba || 0}本場`; select.appendChild(option); });
+    ui.record.hands.forEach((hand, i) => { const option = document.createElement('option'); option.value = i;
+      const handIndex = Number.isInteger(hand.config.hand) ? hand.config.hand : Number.isInteger(hand.config.handIndex) ? hand.config.handIndex : i;
+      option.textContent = `#${i + 1} ${WINDS[(handIndex < 4 ? 0 : 1)]}${(handIndex % 4) + 1}局 ${hand.config.honba || 0}本場`; select.appendChild(option); });
     select.value = r.hand; select.onchange = () => { r.hand = Number(select.value); r.position = 0; renderReview(); }; root.appendChild(select);
     const check = document.createElement('label'); check.className = 'subtle-check';
     const input = document.createElement('input'); input.type = 'checkbox'; input.checked = r.reveal;

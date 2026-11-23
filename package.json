@@ -20,10 +20,18 @@
     "mjai:smoke": "node tools/mjai-smoke.js",
     "grp:selfplay": "node tools/grp-selfplay.js",
     "pipeline": "node tools/tenhou-pipeline.js",
+    "tenhou:fetch": "node tools/tenhou-fetch.js",
+    "policy:dataset": "node tools/policy-dataset.js",
+    "policy:train": "python tools/policy/train_policy.py",
+    "policy:bench": "node tools/policy-bench.js",
+    "profile:cpu": "node tools/profile-cpu.js",
     "divergence": "node tools/divergence.js",
     "shanten:golden": "node tools/shanten-golden.js"
   },
   "devDependencies": {
     "@playwright/test": "^1.64.0"
+  },
+  "dependencies": {
+    "onnxruntime-node": "^1.31.1"
   }
 }

@@ -17,15 +17,20 @@
   G.encode = function (state) {
     if (!state || !Array.isArray(state.scores) || state.scores.length !== 4) throw new Error('grp.encode requires four scores');
     const seat = Number.isInteger(state.seat) && state.seat >= 0 && state.seat < 4 ? state.seat : 0;
+    const startDealer = Number.isInteger(state.startDealer) ? state.startDealer : 0;
     const scores = state.scores.map((s) => finite(Number(s), 25000));
+    // Score slots are ordered from the match's East-1 dealer (0 = 起家), not by
+    // absolute seat number. With the default startDealer 0 this is unchanged.
+    const seatAt = (slot) => (startDealer + slot) % 4;
+    const slotOf = (s) => (s - startDealer + 4) % 4;
     const values = [];
-    for (let s = 0; s < 4; s++) values.push(scores[s] / 1000);
-    for (let s = 0; s < 4; s++) values.push((scores[seat] - scores[s]) / 1000);
+    for (let slot = 0; slot < 4; slot++) values.push(scores[seatAt(slot)] / 1000);
+    for (let slot = 0; slot < 4; slot++) values.push((scores[seat] - scores[seatAt(slot)]) / 1000);
     values.push(finite(Number(state.honba), 0) / 10, finite(Number(state.riichiSticks), 0) / 10,
       clamp(finite(Number(state.handsLeft), 4), 1, 16) / 8,
       clamp(finite(Number(state.handIndex), 0), 0, 8) / 8,
       state.dealer === seat ? 1 : 0);
-    for (let s = 0; s < 4; s++) values.push(seat === s ? 1 : 0);
+    for (let slot = 0; slot < 4; slot++) values.push(slotOf(seat) === slot ? 1 : 0);
     return values;
   };
 
@@ -38,7 +43,11 @@
       return end && end.scores;
     })();
     if (!Array.isArray(finalScores) || finalScores.length !== 4) throw new Error('grp.dataset requires finalScores');
-    const settled = MJ.rank.finalResult(finalScores, options.rankConfig || 'tenhou');
+    const firstConfig = (record.hands[0] && record.hands[0].config) || {};
+    const startDealer = Number.isInteger(record.startDealer) ? record.startDealer
+      : Number.isInteger(firstConfig.startDealer) ? firstConfig.startDealer
+        : Number.isInteger(firstConfig.dealer) ? firstConfig.dealer : 0;
+    const settled = MJ.rank.finalResult(finalScores, options.rankConfig || 'tenhou', startDealer);
     const totalHands = record.mode === 'hanchan' ? 8 : 4;
     // Match id groups every hand of one game. Train/validation splits must keep
     // all hands of a match on the same side, otherwise near-duplicate positions
@@ -48,6 +57,7 @@
     record.hands.forEach((hand, index) => {
       const config = hand.config || {};
       const handIndex = Number.isInteger(config.hand) ? config.hand : index;
+      const handStartDealer = Number.isInteger(config.startDealer) ? config.startDealer : startDealer;
       for (let seat = 0; seat < 4; seat++) {
         rows.push({
           v: G.version,
@@ -55,8 +65,9 @@
           hand: index,
           handIndex,
           seat,
+          startDealer: handStartDealer,
           x: G.encode({ scores: config.scores, seat, honba: config.honba, riichiSticks: config.riichiSticks,
-            handsLeft: Math.max(1, totalHands - handIndex), handIndex, dealer: config.dealer }),
+            handsLeft: Math.max(1, totalHands - handIndex), handIndex, startDealer: handStartDealer, dealer: config.dealer }),
           rank: settled.ranks[seat],
           finalScore: finalScores[seat],
           scoreDelta: finalScores[seat] - (config.scores ? config.scores[seat] : 25000)

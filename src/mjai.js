@@ -90,16 +90,22 @@
     const seat = Number.isInteger(options.seat) && options.seat >= 0 && options.seat < 4 ? options.seat : null;
     const maskOtherDraws = !!options.maskOtherDraws && seat != null;
     const events = [];
+    const startDealer = Number.isInteger(record.startDealer) ? record.startDealer
+      : Number.isInteger(record.hands[0] && record.hands[0].config && record.hands[0].config.startDealer) ? record.hands[0].config.startDealer
+        : Number.isInteger(record.hands[0] && record.hands[0].config && record.hands[0].config.dealer) ? record.hands[0].config.dealer : 0;
     events.push({ type: 'start_game', names: options.names || ['P0', 'P1', 'P2', 'P3'],
       rule: { aka: (record.rules && record.rules.redFives) !== 0, kuitan: !!(record.rules && record.rules.openTanyao),
-        atamahane: !record.rules || record.rules.ron !== 'multiple', mode: record.mode || 'tonpu' } });
+        atamahane: !record.rules || record.rules.ron !== 'multiple', mode: record.mode || 'tonpu',
+        start_dealer: startDealer, riichi_ankan: (record.rules && record.rules.riichiAnkan) || 'wait' } });
     record.hands.forEach((hand) => {
       const config = hand.config || {}, start = (hand.events || []).find((e) => e.type === 'start') || {};
       const acceptedRiichi = new Set((hand.events || []).filter((e) => e.type === 'riichi').map((e) => e.seat));
       const initialDora = start.doraIndicators && start.doraIndicators[0];
+      const handIndex = Number.isInteger(config.hand) ? config.hand : Number.isInteger(config.handIndex) ? config.handIndex : 0;
       if (!Array.isArray(hand.initialHands) || hand.initialHands.length !== 4) throw new Error('配牌データが不正です');
-      events.push({ type: 'start_kyoku', bakaze: config.roundWind === 28 ? 'S' : 'E', kyoku: (config.dealer || 0) + 1,
+      events.push({ type: 'start_kyoku', bakaze: handIndex >= 4 ? 'S' : 'E', kyoku: (handIndex % 4) + 1,
         honba: config.honba || 0, kyotaku: config.riichiSticks || 0, oya: config.dealer || 0,
+        start_dealer: startDealer,
         dora_marker: initialDora == null ? null : tileString(initialDora),
         tehais: hand.initialHands.map((ids) => ids.map(tileString)), scores: (config.scores || []).slice() });
       for (const e of hand.events || []) {
@@ -192,7 +198,9 @@
     flags.push(...ruleDiffs);
     const tenhouSource = options.source === 'tenhou' || rule.source === 'tenhou';
 
-    const hands = rounds.map((round, handIndex) => {
+    const firstDealer = Number.isInteger(rule.start_dealer) ? rule.start_dealer
+      : Number.isInteger(rounds[0].start.oya) ? rounds[0].start.oya : 0;
+    const hands = rounds.map((round, roundIndex) => {
       const pool = createPool();
       const start = round.start;
       if (!Array.isArray(start.tehais) || start.tehais.length !== 4) throw new Error('start_kyoku.tehais が不正です');
@@ -203,8 +211,11 @@
       const scores = Array.isArray(start.scores) && start.scores.length === 4 ? start.scores.slice() : [25000, 25000, 25000, 25000];
       const bakaze = start.bakaze === 'S' ? 28 : 27;
       if (bakaze === 28) sawSouth = true;
-      const config = { roundWind: bakaze, dealer: start.oya || 0, honba: start.honba || 0,
-        riichiSticks: start.kyotaku || 0, scores, hand: handIndex, mode: rule.mode || 'tonpu' };
+      const kyoku = Number.isInteger(start.kyoku) ? Math.max(1, Math.min(4, start.kyoku)) : ((Number(start.oya) || 0) % 4) + 1;
+      const handIndex = (bakaze === 28 ? 4 : 0) + kyoku - 1;
+      const config = { roundWind: bakaze, dealer: start.oya || 0, startDealer: firstDealer, honba: start.honba || 0,
+        riichiSticks: start.kyotaku || 0, scores, hand: handIndex, handIndex, mode: rule.mode || 'tonpu',
+        rules: { riichiAnkan: rule.riichi_ankan || 'wait', startDealer: firstDealer } };
       const state = {
         hands: initialHands.map((h) => h.slice()), melds: [[], [], [], []], discards: [[], [], [], []],
         dora: start.dora_marker ? [pool.take(start.dora_marker)] : [], draws: [], lastDraw: [null, null, null, null],
@@ -377,11 +388,11 @@
     const mode = rule.mode === 'hanchan' || sawSouth ? 'hanchan' : 'tonpu';
     const record = {
       format: 'suitaku-riichi', version: 1, createdAt: options.createdAt || new Date().toISOString(),
-      mode, ai: 'imported',
+      mode, ai: 'imported', startDealer: firstDealer,
       rules: { players: 4, initialScore: 25000, redFives: rule.aka === false ? 0 : 3,
         openTanyao: rule.kuitan !== false, ron: rule.atamahane === false ? 'multiple' : 'atamahane',
         dealerTenpaiRepeat: true, agariYame: false, extension: false, kuikae: false,
-        nineTerminals: false, nagashiMangan: false },
+        nineTerminals: false, nagashiMangan: false, riichiAnkan: rule.riichi_ankan || 'wait', startDealer: firstDealer },
       hands, annotations: [], finalScores: hands[hands.length - 1].finalScores.slice(), finished: true,
       mjai: { rule: clone(rule), flags: [...new Set(flags)], source: options.source || 'mjai' }
     };

@@ -73,6 +73,28 @@ function view(text, extra = {}) {
   const legacyAgent = MJ.ai.create(3, { rankBias: false });
   const legacyDecision = await legacyAgent.chooseDiscard(rankView);
   assert.equal(legacyDecision.analysis.rankBias, 1, 'the per-agent switch reaches chooseDiscard');
+  // Rank-point outcomes are priced for win / deal-in / draw, and the final hand
+  // uses the deterministic placement instead of pretending another hand remains.
+  const rankDiscard = MJ.ai.analyzeDiscard(rankView, 'standard');
+  const ranked = rankDiscard.candidates[0];
+  assert(ranked.rank && [ranked.rank.win, ranked.rank.loss, ranked.rank.draw, ranked.rank.expected].every(Number.isFinite),
+    'rank EV carries the three outcomes');
+  const rawDiscard = MJ.ai.analyzeDiscard(rankView, 'standard', MJ.ai.weights, { rankBias: false });
+  assert.equal(rawDiscard.candidates[0].rank, null, 'rankBias:false keeps the legacy raw-point path');
+  const riichiProbe = MJ.ai.rankRiichi(rankView, { winProbability: 0.2, estimatedWinPoints: 2000, danger: 2, expectedLoss: 500 });
+  assert.equal(typeof riichiProbe.accept, 'boolean', 'riichi is compared in rank points');
+  const lastView = { ...rankView, seat: 3, isDealer: false, handsLeft: 1, dealer: 0,
+    scores: [30000, 30000, 30000, 10000], riichiSticks: 0, honba: 0 };
+  const cheapRon = { score: { payments: { ron: 1000 } } };
+  assert.equal(MJ.ai.wantWin(lastView, cheapRon, false, 0).accept, false,
+    'a final-hand non-dealer win that still leaves us last is declined');
+  assert.equal(MJ.ai.wantWin({ ...lastView, isDealer: true }, cheapRon, false, 0).accept, true,
+    'a dealer win repeats the hand and is accepted');
+  assert.equal(MJ.ai.wantWin({ ...lastView, handsLeft: 2 }, cheapRon, false, 0).accept, true,
+    'a win with hands remaining is accepted');
+  const bigRon = { score: { payments: { ron: 21000 } } };
+  assert.equal(MJ.ai.wantWin(lastView, bigRon, false, 0).accept, true,
+    'a win that leaves last place is accepted');
   const defaults = JSON.stringify(MJ.ai.weights);
   const base = await ai.chooseDiscard(view('1589m38p36s113356z'));
   const heavy = await MJ.ai.create(1, { weights: { ...MJ.ai.weights, shapeGain: 10 } }).chooseDiscard(view('1589m38p36s113356z'));

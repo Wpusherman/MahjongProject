@@ -54,6 +54,16 @@ async function makeRecord(seeds) {
   const validation = M.validate(back);
   assert(validation.ok, validation.warnings.join('\n'));
   assert.equal(back.hands.length, record.hands.length);
+  const kyokuStarts = events.filter((e) => e.type === 'start_kyoku');
+  for (let i = 0; i < record.hands.length; i++) {
+    assert.equal(kyokuStarts[i].oya, record.hands[i].config.dealer, 'oya is the current dealer, not a hardcoded seat');
+    assert.equal(kyokuStarts[i].kyoku, (record.hands[i].config.hand % 4) + 1, 'kyoku follows dealer moves');
+  }
+  assert.equal(back.startDealer, record.hands[0].config.startDealer, 'startDealer survives the mjai round-trip');
+  const shifted = { ...record, startDealer: 2, hands: record.hands.map((h) => ({ ...h, config: { ...h.config, startDealer: 2 } })) };
+  const shiftedBack = M.toSuitaku(M.fromSuitaku(shifted), { createdAt: '2026-01-01T00:00:00.000Z' });
+  assert.equal(shiftedBack.startDealer, 2);
+  assert(shiftedBack.hands.every((h) => h.config.startDealer === 2), 'each hand carries the match startDealer');
   for (let i = 0; i < record.hands.length; i++) {
     assert.equal(back.hands[i].wall.length, 136);
     assert.equal(new Set(back.hands[i].wall).size, 136);
@@ -108,6 +118,8 @@ async function makeRecord(seeds) {
   assert.equal(paoRecord.hands[0].result.paoWho, 2);
   assert.throws(() => M.toSuitaku(paoEvents, { strict: true }), /包/);
   assert.equal(tenhouRecord.mode, 'hanchan');
+  assert.equal(tenhouRecord.startDealer, tenhouRecord.hands[0].config.dealer, 'Tenhou INIT oya seeds the match startDealer');
+  assert.equal(tenhouEvents.find((e) => e.type === 'start_kyoku').oya, tenhouRecord.hands[0].config.dealer);
   assert.deepEqual(tenhouRecord.hands[0].finalScores, [27000, 24400, 24400, 24200]);
   assert.equal(tenhouRecord.hands[0].result.type, 'win');
   assert.equal(tenhouRecord.hands[0].result.winner, 0);

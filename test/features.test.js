@@ -33,7 +33,9 @@ async function makeRecord(seed) {
   obs.furiten = game.isFuriten(sample.seat);
   const encoded = F.encode(obs);
   assert.deepEqual(Array.from(encoded.data), Array.from(sample.x.data));
-  assert.deepEqual(sample.label, { kind: 'discard', tile: event.tileId >> 2, riichi: !!event.riichi, tsumogiri: !!event.tsumogiri, forced: false });
+  const { canRiichi, ...sampleLabel } = sample.label;
+  assert.equal(typeof canRiichi, 'boolean');
+  assert.deepEqual(sampleLabel, { kind: 'discard', tile: event.tileId >> 2, riichi: !!event.riichi, tsumogiri: !!event.tsumogiri, forced: false });
 
   const handChannel = encoded.data.slice(0, 34);
   const counts = T.countsFromIds(obs.hand);
@@ -67,6 +69,17 @@ async function makeRecord(seed) {
   const external = F.dataset(mjaiRecord);
   assert(external.length > 0);
   assert.equal(external[0].x.data.length, samples[0].x.data.length);
+
+  // Tenhou-style records have `call` events but no `response` events. The call
+  // and pass decisions must be reconstructed from the legal options.
+  const noResponses = JSON.parse(JSON.stringify(record));
+  noResponses.hands = noResponses.hands.map((h) => ({ ...h, events: h.events.filter((e) => e.type !== 'response') }));
+  const synthetic = F.dataset(noResponses);
+  assert(synthetic.some((s) => s.meta.synthetic && s.meta.kind === 'response'), 'call decisions are synthesized');
+  assert(synthetic.some((s) => s.label.kind === 'pass'), 'pass decisions are synthesized');
+  assert(synthetic.some((s) => ['pon', 'chi', 'kan', 'ron'].includes(s.label.kind)), 'taken calls are synthesized');
+  assert(synthetic.every((s) => s.label.kind !== 'discard' || typeof s.label.canRiichi === 'boolean'),
+    'discard samples carry the riichi opportunity flag');
 
   // Tsumo is a label at the winning draw, not only a ron response.
   const tsumoRecord = await makeRecord(2);

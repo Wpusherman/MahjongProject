@@ -33,15 +33,19 @@
     return resolved;
   };
 
-  R.order = function (scores) {
+  // Ties use the starting seat order: positions counted from the match's East-1
+  // dealer (0 = 起家), not the absolute seat number.
+  const orderIndex = (seat, startDealer) => Number.isInteger(startDealer) ? (seat - startDealer + 4) % 4 : seat;
+  R.order = function (scores, startDealer) {
     return scores.map((score, seat) => ({ score, seat }))
-      .sort((a, b) => b.score - a.score || a.seat - b.seat).map((x) => x.seat);
+      .sort((a, b) => b.score - a.score || orderIndex(a.seat, startDealer) - orderIndex(b.seat, startDealer))
+      .map((x) => x.seat);
   };
 
-  R.finalResult = function (scores, config) {
+  R.finalResult = function (scores, config, startDealer) {
     const c = R.resolve(config);
     if (!Array.isArray(scores) || scores.length !== 4 || !scores.every(Number.isFinite)) throw new Error('scores must be four finite numbers');
-    const order = R.order(scores), ranks = Array(4), points = Array(4), uma = Array(4), raw = Array(4), oka = Array(4);
+    const order = R.order(scores, startDealer), ranks = Array(4), points = Array(4), uma = Array(4), raw = Array(4), oka = Array(4);
     order.forEach((seat, i) => { ranks[seat] = i + 1; });
     const okaValue = Math.max(0, (c.returnScore - c.startScore) * 4 / c.scoreUnit);
     for (let seat = 0; seat < 4; seat++) {

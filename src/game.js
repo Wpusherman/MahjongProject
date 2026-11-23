@@ -24,6 +24,51 @@
     return out;
   };
 
+  // Runtime rule switches. `riichiAnkan` follows the common Tenhou rule by
+  // default: a concealed kan is legal after riichi only while the wait set is
+  // unchanged. "strict" additionally requires every winning decomposition to
+  // use the original triplet. "none" disables riichi ankan entirely.
+  const RIICHI_ANKAN_MODES = ['wait', 'strict', 'none'];
+  const DEFAULT_RULES = { riichiAnkan: 'wait', startDealer: 'random' };
+  const hashSeed = (text) => {
+    let h = 2166136261;
+    for (let i = 0; i < text.length; i++) { h ^= text.charCodeAt(i); h = Math.imul(h, 16777619); }
+    return h >>> 0;
+  };
+  const seedToUint = (seed) => Number.isFinite(seed) ? seed >>> 0 : hashSeed(String(seed == null ? 0 : seed));
+  function dealerRng(seed) {
+    let a = seedToUint(seed);
+    return function () {
+      a |= 0; a = (a + 0x6d2b79f5) | 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  const normalizeRules = (rules) => {
+    const out = Object.assign({}, DEFAULT_RULES, rules || {});
+    if (!RIICHI_ANKAN_MODES.includes(out.riichiAnkan)) throw new Error('Invalid rules.riichiAnkan: ' + out.riichiAnkan);
+    if (!(out.startDealer === 'random' || (Number.isInteger(out.startDealer) && out.startDealer >= 0 && out.startDealer <= 3))) {
+      throw new Error('Invalid rules.startDealer: ' + out.startDealer);
+    }
+    return out;
+  };
+  // A separate RNG stream from the wall: adding this rule never changes an
+  // existing deal for a fixed seed.
+  const resolveStartDealer = (setting, seed) => {
+    if (Number.isInteger(setting) && setting >= 0 && setting <= 3) return setting;
+    return Math.floor(dealerRng(String(seed == null ? 0 : seed) + ':dealer')() * 4);
+  };
+  const resolveSeating = (config, seed) => {
+    const settings = config || {};
+    const rules = normalizeRules(settings.rules);
+    const startDealer = Number.isInteger(settings.startDealer) ? settings.startDealer
+      : Number.isInteger(settings.dealer) ? settings.dealer
+        : resolveStartDealer(rules.startDealer, seed);
+    const dealer = Number.isInteger(settings.dealer) ? settings.dealer : startDealer;
+    return { rules, startDealer, dealer };
+  };
+
   function Game(config) {
     this.onEvent = config.onEvent || (() => {});
     this.onUpdate = config.onUpdate || (() => {});
@@ -46,11 +91,13 @@
     this.onEvent(msg, data);
   };
   Game.prototype.setup = function (config) {
-    Object.assign(this, { roundWind: config.roundWind, dealer: config.dealer, honba: config.honba || 0,
+    const seating = resolveSeating(config, config.seed);
+    Object.assign(this, { roundWind: config.roundWind, dealer: seating.dealer, startDealer: seating.startDealer,
+      rules: seating.rules, honba: config.honba || 0,
       riichiSticks: config.riichiSticks || 0, turnCount: 0, anyCall: false, ended: false, result: null,
-      wallIndex: 0, liveEnd: 122, rinshanIndex: 0, doraRevealed: 1, currentSeat: config.dealer,
-      handIndex: config.hand != null ? config.hand : 0, mode: config.mode || 'tonpu',
-      rankConfig: config.rankConfig });
+      wallIndex: 0, liveEnd: 122, rinshanIndex: 0, doraRevealed: 1, currentSeat: seating.dealer,
+      handIndex: Number.isInteger(config.hand) ? config.hand : Number.isInteger(config.handIndex) ? config.handIndex : 0,
+      mode: config.mode || 'tonpu', rankConfig: config.rankConfig });
     this.handsLeft = Math.max(1, (this.mode === 'hanchan' ? 8 : 4) - this.handIndex);
     this.players = Array.from({ length: 4 }, (_, seat) => ({ seat, hand: [], melds: [], discards: [], river: [],
       discardHistory: [], score: config.scores[seat], riichi: false, doubleRiichi: false, ippatsu: false,
@@ -68,7 +115,9 @@
     for (let i = 0; i < 4; i++) this.players[(this.dealer + i) % 4].hand.push(this.liveWall[this.wallIndex++]);
     for (const p of this.players) p.hand = sortHand(p.hand);
     this.syncDora();
-    this.recording = { config: clone(config), wall: this.wall.slice(), initialHands: this.players.map((p) => p.hand.slice()), events: [] };
+    const recorded = Object.assign({}, config, { dealer: this.dealer, startDealer: this.startDealer,
+      hand: this.handIndex, handIndex: this.handIndex, rules: clone(this.rules) });
+    this.recording = { config: clone(recorded), wall: this.wall.slice(), initialHands: this.players.map((p) => p.hand.slice()), events: [] };
     delete this.recording.config.wall;
     this.record('start', { scores: config.scores, doraIndicators: this.doraIndicators });
   };
@@ -115,7 +164,9 @@
       discards: this.players.map((x) => x.discards.slice()), doraIndicators: this.doraIndicators.slice(),
       scores: this.players.map((x) => x.score), seatWinds: this.players.map((_, s) => this.seatWindOf(s)),
       roundWind: this.roundWind, seatWind: this.seatWindOf(seat),
-      dealer: this.dealer, honba: this.honba, riichiSticks: this.riichiSticks,
+      dealer: this.dealer, startDealer: this.startDealer, seatOrder: (seat - this.startDealer + 4) % 4,
+      roundNumber: (this.handIndex % 4) + 1,
+      honba: this.honba, riichiSticks: this.riichiSticks,
       handIndex: this.handIndex, mode: this.mode, handsLeft: this.handsLeft, rankConfig: this.rankConfig,
       isDealer: seat === this.dealer, riichi: p.riichi, menzen: !p.melds.some((m) => m.open),
       liveRemaining: this.liveRemaining(), unseen: this.computeUnseen(seat), opponents,
@@ -164,7 +215,7 @@
     const p = this.players[seat], type = tileId >> 2, counts = T.countsFromIds(p.hand);
     const opts = { tile: type, from, ron: false, pon: null, kan: null, chi: [] };
     const win = this.evalWin(seat, tileId, { tsumo: false, chankan: !!robKan, houtei: !robKan && !this.lastDrawRinshan && this.liveRemaining() === 0 });
-    if (win && !this.isFuriten(seat) && (robKan !== 'ankan' || win.ev.kokushi)) opts.ron = true;
+    if (win && !this.isFuriten(seat) && (robKan !== 'ankan' || win.ev.kokushi)) { opts.ron = true; opts.win = win; }
     if (!robKan && !p.riichi && this.liveRemaining() > 0) {
       if (counts[type] >= 2 && p.hand.some((id) => (id >> 2) !== type)) opts.pon = type;
       if (counts[type] >= 3 && this.rinshanIndex < 4) opts.kan = type;
@@ -192,17 +243,23 @@
   };
   Game.prototype.availableKans = function (seat) {
     const p = this.players[seat], counts = T.countsFromIds(p.hand), out = [];
+    const riichiAnkan = this.rules ? this.rules.riichiAnkan : 'wait';
     if (this.rinshanIndex >= 4 || this.liveRemaining() < 1) return out;
     for (let t = 0; t < 34; t++) if (counts[t] === 4) {
       if (p.riichi) {
-        if ((p.drawnTile >> 2) !== t) continue;
+        if (riichiAnkan === 'none') continue;
+        // Only the tile just drawn may complete the quad; using a physical
+        // fourth copy that was already in hand ("okuri-kan") is not allowed.
+        if (p.drawnTile == null || (p.drawnTile >> 2) !== t) continue;
         const before = p.hand.filter((id) => id !== p.drawnTile);
         const after = p.hand.filter((id) => (id >> 2) !== t);
         const waits = this.waits(seat, before);
         if (JSON.stringify(waits) !== JSON.stringify(this.waits(seat, after, p.melds.length + 1))) continue;
-        // Every winning decomposition must use the original three tiles as a triplet.
-        const c = T.countsFromIds(before);
-        if (waits.some((w) => { c[w]++; const ds = MJ.agari.decompose(c); c[w]--; return ds.some((d) => !d.sets.some((s) => s.kind === 'trip' && s.type === t)); })) continue;
+        if (riichiAnkan === 'strict') {
+          // Every winning decomposition must use the original three tiles as a triplet.
+          const c = T.countsFromIds(before);
+          if (waits.some((w) => { c[w]++; const ds = MJ.agari.decompose(c); c[w]--; return ds.some((d) => !d.sets.some((s) => s.kind === 'trip' && s.type === t)); })) continue;
+        }
       }
       out.push({ kind: 'ankan', tile: t });
     }
@@ -319,7 +376,7 @@
       agent.lastCallAnalysis = null;
       // Every seat goes through the same agent call, even with no legal call.
       // The UI paces the agent itself, so the delay does not disclose options.
-      const action = await agent.wantCall(this.getObservation(seat, { callTile: tileId, callType: tileId >> 2, callFrom: from, isCallDecision: true }), opts);
+      const action = await agent.wantCall(this.getObservation(seat, { callTile: tileId, callType: tileId >> 2, callFrom: from, isCallDecision: true, win: opts && opts.ron ? opts.win : undefined }), opts);
       if (this.cancelled) return null;
       if (!opts) continue;
       this.record('response', { seat, from, tileId, robKan: robKan || null, action, options: opts, analysis: agent.lastCallAnalysis });
@@ -361,7 +418,9 @@
         }
         if (this.cancelled) return null;
         const kans = this.availableKans(cur);
-        if (kans.length) {
+        // Riichi seats always pass through the same (possibly empty) kan check,
+        // so the duration of the check cannot disclose a concealed kan option.
+        if (kans.length || p.riichi) {
           const k = await this.agents[cur].wantKan(this.getObservation(cur, { kans }), kans);
           if (this.cancelled) return null;
           if (k) {
@@ -403,6 +462,8 @@
   };
   MJ.Game = Game;
   MJ.sortHand = sortHand;
+  MJ.rules = { version: 'rules-v1', DEFAULT_RULES, RIICHI_ANKAN_MODES, normalize: normalizeRules,
+    resolveStartDealer, resolveSeating };
   MJ.match = {
     advance(state, result, scores) {
       const abort = result.type === 'draw' && result.reason !== 'exhaustive';

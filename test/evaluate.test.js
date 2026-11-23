@@ -39,6 +39,13 @@ const MJ = globalThis.MJ, E = MJ.evaluate;
   assert.equal(evenSummary.seedClusterRankPoints.mean, 0);
   assert.equal(evenSummary.seedClusterRankPoints.sd, 0);
 
+  // The East-1 dealer is a per-seed match setting, independent of candidate seat.
+  const fixedDealer = await E.runSeed({ seed: 3, level: 'fast', startDealer: 2, candidateSeatMode: 0 });
+  assert.equal(fixedDealer.length, 1);
+  assert.equal(fixedDealer[0].startDealer, 2, 'a fixed startDealer reaches the replay');
+  const randomDealer = await E.runSeed({ seed: 3, level: 'fast', candidateSeatMode: 0 });
+  assert.equal(randomDealer[0].startDealer, MJ.rules.resolveStartDealer('random', 3), 'random startDealer is seed-derived');
+
   // Real hand-start states from Tenhou logs replace the synthetic opening.
   const state = { scores: [35000, 30000, 20000, 15000], dealer: 1, honba: 2, riichiSticks: 1, handIndex: 6 };
   const started = await E.runSeed({ seed: 9, level: 'fast', rankConfig: 'tenhou', startStates: [state] });
@@ -71,6 +78,27 @@ const MJ = globalThis.MJ, E = MJ.evaluate;
   const delta = E.pairedDelta(synthetic, control);
   assert.equal(delta.mean, 10);
   assert.equal(delta.n, 20);
+
+  // Divergent-deal summary: restrict the paired comparison to deals that actually
+  // changed an action, and keep one example per seed.
+  const divRows = [
+    { seed: 0, candidateSeat: 0, points: 50, startState: { index: 0, source: 'a' },
+      divergence: { decisions: 10, diverged: 2, examples: [{ kind: 'discard', chosen: 1, other: 2 }] } },
+    { seed: 1, candidateSeat: 0, points: -10, divergence: { decisions: 10, diverged: 0, examples: [] } },
+    { seed: 2, candidateSeat: 0, points: 20, startState: { index: 2, source: 'b' },
+      divergence: { decisions: 10, diverged: 1, examples: [{ kind: 'call', chosen: 'pass', other: 'pon:1' }] } }
+  ];
+  const divControl = divRows.map((r) => ({ seed: r.seed, candidateSeat: 0, points: 0 }));
+  const divergent = E.divergentSummary(divRows, divControl);
+  assert.equal(divergent.decisions, 30);
+  assert.equal(divergent.diverged, 3);
+  assert.equal(divergent.deals, 2);
+  assert.equal(divergent.seeds, 2);
+  assert.equal(divergent.points.mean, 35);
+  assert.equal(divergent.paired.mean, 35);
+  assert.equal(divergent.paired.deals, 2);
+  assert.equal(divergent.examples.length, 2);
+  assert.deepEqual(divergent.examples.map((e) => e.seed), [0, 2]);
 
   // Same-observation counterfactual wiring: identical policies diverge 0%,
   // a deliberate weight change must produce a non-zero rate.
