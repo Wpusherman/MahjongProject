@@ -133,10 +133,20 @@ function score(text, tile, extra = {}) {
   assert.deepEqual(ankanTiles(riichiGame('123m456p777s88s11z', 24, { riichiAnkan: 'none' }).g), [], 'none disables riichi ankan');
   assert.deepEqual(ankanTiles(riichiGame('23s444s66m678p678p', 21, { riichiAnkan: 'wait' }).g), [],
     'NG: an ankan that changes the wait is illegal');
-  assert.deepEqual(ankanTiles(riichiGame('777m44m456m666p88p', 3, { riichiAnkan: 'wait' }).g), [3],
-    'wait mode allows a kan whose waits are unchanged even if one decomposition uses a run');
+  // Correct divergence example: before waits {4m,7m}; after taking the 8s quad
+  // into the kan the waits are still {4m,7m}. Wait mode allows it. Strict mode
+  // rejects it because 4m/7m can also win via 456m + 678s + 678s + 678s + 白白,
+  // which does not use the 888s triplet.
+  assert.deepEqual(ankanTiles(riichiGame('56m666777888s55z', 25, { riichiAnkan: 'wait' }).g), [25],
+    'wait mode allows an ankan whose wait set is unchanged even if a decomposition uses sequences');
+  assert.deepEqual(ankanTiles(riichiGame('56m666777888s55z', 25, { riichiAnkan: 'strict' }).g), [],
+    'strict mode rejects unless every decomposition uses the triplet');
+  // The old example was wrong: before waits {4m,7m,8p}, but the kan owns all four
+  // 4m, so 4m is no longer a wait after the kan ({7m,8p}). Both modes reject it.
+  assert.deepEqual(ankanTiles(riichiGame('777m44m456m666p88p', 3, { riichiAnkan: 'wait' }).g), [],
+    'NG: the fourth copy is in the kan, so the quad tile is no longer a wait');
   assert.deepEqual(ankanTiles(riichiGame('777m44m456m666p88p', 3, { riichiAnkan: 'strict' }).g), [],
-    'strict mode rejects a kan unless every decomposition uses the triplet');
+    'strict also rejects the wait-changing kan');
   const okuri = ok.g, okPlayer = okuri.players[0];
   okPlayer.drawnTile = okPlayer.hand.find((id) => (id >> 2) !== 24);
   assert(!ankanTiles(okuri).includes(24), 'NG: the fourth copy must be the tile just drawn');
@@ -152,6 +162,113 @@ function score(text, tile, extra = {}) {
     'AI wantKan takes a safe riichi ankan');
   aiObs.opponents = aiObs.opponents.map((o, i) => i === 0 ? { ...o, riichi: true } : o);
   assert.equal(await kanAI.wantKan(aiObs, [{ kind: 'ankan', tile: 24 }]), null, 'AI wantKan declines under threat');
+
+  // Exhaustive riichi-ankan check: the 13-tile wait set and the 10-tile + kan
+  // wait set must be enumerated over every decomposition, including seven pairs
+  // and thirteen orphans. The wait decision is exactly set equality; strict
+  // additionally requires every winning decomposition to use the triplet.
+  const waitSet = (handIds, meldCount, extraMelds) => {
+    const counts = T.countsFromIds(handIds), out = [];
+    for (let t = 0; t < 34; t++) {
+      const owned = counts[t] + (extraMelds || []).reduce((n, m) => n + m.tiles.filter((id) => (id >> 2) === t).length, 0);
+      if (owned >= 4) continue;
+      counts[t]++;
+      if (MJ.agari.isAgari(counts, meldCount)) out.push(t);
+      counts[t]--;
+    }
+    return out;
+  };
+  const strictKeepsTriplet = (beforeIds, quadType, waits) => {
+    const c = T.countsFromIds(beforeIds);
+    return waits.every((w) => {
+      c[w]++;
+      const special = MJ.agari.isChiitoi(c, 0) || MJ.agari.isKokushi(c, 0);
+      const ds = MJ.agari.decompose(c).filter((d) => d.sets.length === 4);
+      c[w]--;
+      if (special) return false;
+      return ds.every((d) => d.sets.some((s) => s.kind === 'trip' && s.type === quadType));
+    });
+  };
+  const same = (a, b) => a.length === b.length && a.every((x, i) => x === b[i]);
+  const expectedAnkan = (beforeIds, quadType, mode) => {
+    const before = waitSet(beforeIds, 0);
+    const quad = [0, 1, 2, 3].map((k) => quadType * 4 + k);
+    const afterIds = beforeIds.filter((id) => (id >> 2) !== quadType);
+    const after = waitSet(afterIds, 1, [{ kind: 'kan', type: quadType, open: false, tiles: quad }]);
+    if (mode === 'none' || !same(before, after)) return false;
+    return mode === 'wait' || strictKeepsTriplet(beforeIds, quadType, before);
+  };
+  // Deterministic near-win generator: a random winning hand with a triplet, then
+  // remove one tile from another set (or the pair) to make a tenpai hand.
+  let ruleSeed = 20261123;
+  const ruleRng = () => { ruleSeed = (Math.imul(ruleSeed, 1664525) + 1013904223) >>> 0; return ruleSeed / 4294967296; };
+  const makeRiichi = () => {
+    const sets = []; let trip = -1;
+    while (sets.length < 4) {
+      if (ruleRng() < 0.5) {
+        const t = Math.floor(ruleRng() * 34);
+        if (sets.some((s) => s.kind === 'trip' && s.type === t)) continue;
+        sets.push({ kind: 'trip', type: t, tiles: [t, t, t] }); if (trip < 0) trip = t;
+      } else {
+        const st = Math.floor(ruleRng() * 3) * 9 + Math.floor(ruleRng() * 7);
+        if (sets.some((s) => s.kind === 'seq' && s.type === st)) continue;
+        sets.push({ kind: 'seq', type: st, tiles: [st, st + 1, st + 2] });
+      }
+    }
+    const pair = Math.floor(ruleRng() * 34);
+    const counts = Array(34).fill(0);
+    for (const s of sets) for (const t of s.tiles) counts[t]++;
+    counts[pair] += 2;
+    if (counts.some((n) => n > 4)) return null;
+    const pool = [];
+    for (const s of sets) if (!(s.kind === 'trip' && s.type === trip)) pool.push(...s.tiles);
+    pool.push(pair);
+    const remove = pool[Math.floor(ruleRng() * pool.length)];
+    const before = [];
+    for (let t = 0; t < 34; t++) for (let n = 0; n < counts[t]; n++) before.push(t * 4 + n);
+    const at = before.findIndex((id) => (id >> 2) === remove);
+    if (at < 0) return null;
+    before.splice(at, 1);
+    const beforeCounts = T.countsFromIds(before);
+    if (beforeCounts[trip] !== 3) return null;
+    return { before, trip };
+  };
+  const cases = Number(process.env.RULES_ANKAN_CASES) || 10000;
+  const checkGame = game();
+  let checked = 0;
+  for (let i = 0; i < cases; i++) {
+    const made = makeRiichi();
+    if (!made) continue;
+    const before = made.before;
+    assert.deepEqual(waitSet(before, 0), checkGame.waits(0, before), 'wait set is the union over all decompositions');
+    const drawn = [0, 1, 2, 3].map((k) => made.trip * 4 + k).find((id) => !before.includes(id));
+    const hand = before.concat(drawn).sort((a, b) => a - b);
+    for (const mode of ['wait', 'strict', 'none']) {
+      checkGame.rules = MJ.rules.normalize({ riichiAnkan: mode });
+      checkGame.players[0].hand = hand.slice(); checkGame.players[0].drawnTile = drawn;
+      checkGame.players[0].riichi = true; checkGame.players[0].melds = [];
+      const actual = checkGame.availableKans(0).some((k) => k.kind === 'ankan' && k.tile === made.trip);
+      assert.equal(actual, expectedAnkan(before, made.trip, mode),
+        `${mode} ankan decision must equal the enumerated wait-set test (case ${i})`);
+    }
+    checked++;
+  }
+  assert(checked > 0, 'the riichi ankan generator produced cases');
+  // Seven pairs / thirteen orphans have no quad, but their waits must be part of
+  // the same enumeration.
+  const chiitoi = [];
+  for (const t of [0, 2, 4, 6, 8, 10]) chiitoi.push(t * 4, t * 4 + 1);
+  chiitoi.push(12 * 4);
+  assert(waitSet(chiitoi, 0).includes(12));
+  const chiitoiWin = T.countsFromIds(chiitoi); chiitoiWin[12]++;
+  assert(MJ.agari.isChiitoi(chiitoiWin, 0));
+  const kokushi = T.YAOCHU_TYPES.map((t) => t * 4);
+  const kokushiWait = waitSet(kokushi, 0);
+  assert(kokushiWait.length > 0 && kokushiWait.every((t) => T.YAOCHU_TYPES.includes(t)));
+  checkGame.rules = MJ.rules.normalize({ riichiAnkan: 'wait' });
+  checkGame.players[0].hand = chiitoi.slice(); checkGame.players[0].drawnTile = null;
+  checkGame.players[0].riichi = false; checkGame.players[0].melds = [];
+  assert.equal(checkGame.availableKans(0).length, 0, 'special hands have no concealed kan');
 
   // Start dealer: deterministic, uniform from a stream separate from the wall.
   const seen = [0, 0, 0, 0];

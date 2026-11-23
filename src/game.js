@@ -179,10 +179,11 @@
   };
   // Kept as an alias for older callers; new code should use getObservation.
   Game.prototype.buildView = function (seat, extra) { return this.getObservation(seat, extra); };
-  Game.prototype.waits = function (seat, hand, meldCount) {
+  Game.prototype.waits = function (seat, hand, meldCount, extraMelds) {
     const p = this.players[seat], counts = T.countsFromIds(hand || p.hand), out = [];
+    const melds = extraMelds && extraMelds.length ? p.melds.concat(extraMelds) : p.melds;
     for (let t = 0; t < 34; t++) {
-      const owned = counts[t] + p.melds.reduce((n, m) => n + m.tiles.filter((id) => (id >> 2) === t).length, 0);
+      const owned = counts[t] + melds.reduce((n, m) => n + m.tiles.filter((id) => (id >> 2) === t).length, 0);
       if (owned >= 4) continue;
       counts[t]++;
       if (MJ.agari.isAgari(counts, meldCount == null ? p.melds.length : meldCount)) out.push(t);
@@ -254,11 +255,26 @@
         const before = p.hand.filter((id) => id !== p.drawnTile);
         const after = p.hand.filter((id) => (id >> 2) !== t);
         const waits = this.waits(seat, before);
-        if (JSON.stringify(waits) !== JSON.stringify(this.waits(seat, after, p.melds.length + 1))) continue;
+        // The four tiles of the proposed kan are already visible, so the tile
+        // itself cannot be a wait after the kan. Passing the hypothetical meld
+        // to waits() keeps the owned-count check exact.
+        const quad = p.hand.filter((id) => (id >> 2) === t);
+        const afterWaits = this.waits(seat, after, p.melds.length + 1,
+          [{ kind: 'kan', type: t, open: false, tiles: quad }]);
+        if (JSON.stringify(waits) !== JSON.stringify(afterWaits)) continue;
         if (riichiAnkan === 'strict') {
           // Every winning decomposition must use the original three tiles as a triplet.
+          // Special hands (seven pairs / thirteen orphans) have no triplet, so they
+          // fail strict mode too.
           const c = T.countsFromIds(before);
-          if (waits.some((w) => { c[w]++; const ds = MJ.agari.decompose(c); c[w]--; return ds.some((d) => !d.sets.some((s) => s.kind === 'trip' && s.type === t)); })) continue;
+          if (waits.some((w) => {
+            c[w]++;
+            const special = MJ.agari.isChiitoi(c, 0) || MJ.agari.isKokushi(c, 0);
+            const ds = MJ.agari.decompose(c).filter((d) => d.sets.length === 4);
+            c[w]--;
+            if (special) return true;
+            return ds.some((d) => !d.sets.some((s) => s.kind === 'trip' && s.type === t));
+          })) continue;
         }
       }
       out.push({ kind: 'ankan', tile: t });
