@@ -19,6 +19,9 @@ const FAST = process.argv.includes('--fast');
     const page = await browser.newPage({ viewport: { width: 1440, height: 1100 } });
     const errors = []; page.on('pageerror', (e) => errors.push(e.message));
     await page.goto(pathToFileURL(path.resolve(__dirname, '../mahjong.html')).href);
+    // Random start dealer is the product default; tests pin it so the first
+    // render always has the human as dealer with a drawn tile.
+    await page.evaluate(() => { MJ.ui.startDealer = 0; MJ.ui.matchSeed = 12345; });
     await page.getByRole('button', { name: '対局をはじめる →' }).click();
     await page.waitForFunction(() => MJ.ui.mode === 'discard' || MJ.ui.mode === 'choice');
     await page.evaluate(() => document.fonts.ready);
@@ -98,6 +101,7 @@ const FAST = process.argv.includes('--fast');
     // Riichi ankan UI: the human gets a kan / tsumogiri choice with a fixed delay.
     const kanPage = await browser.newPage({ viewport: { width: 1280, height: 900 } });
     await kanPage.goto(pathToFileURL(path.resolve(__dirname, '../mahjong.html')).href);
+    await kanPage.evaluate(() => { MJ.ui.startDealer = 0; MJ.ui.matchSeed = 12345; });
     await kanPage.getByRole('button', { name: '対局をはじめる →' }).click();
     await kanPage.waitForFunction(() => MJ.ui.mode === 'discard');
     const kanButtons = await kanPage.evaluate(async () => {
@@ -212,6 +216,7 @@ const FAST = process.argv.includes('--fast');
     // Separate page: forced riichi discard needs no click; tsumo still needs explicit confirmation.
     const auto = await browser.newPage();
     await auto.goto(pathToFileURL(path.resolve(__dirname, '../mahjong.html')).href);
+    await auto.evaluate(() => { MJ.ui.startDealer = 0; MJ.ui.matchSeed = 12345; });
     await auto.getByRole('button', { name: '対局をはじめる →' }).click();
     await auto.waitForFunction(() => MJ.ui.mode === 'discard');
     const automated = await auto.evaluate(async () => {
