@@ -33,9 +33,11 @@ async function makeRecord(seed) {
   obs.furiten = game.isFuriten(sample.seat);
   const encoded = F.encode(obs);
   assert.deepEqual(Array.from(encoded.data), Array.from(sample.x.data));
-  const { canRiichi, ...sampleLabel } = sample.label;
+  const { canRiichi, legal, ...sampleLabel } = sample.label;
   assert.equal(typeof canRiichi, 'boolean');
   assert.deepEqual(sampleLabel, { kind: 'discard', tile: event.tileId >> 2, riichi: !!event.riichi, tsumogiri: !!event.tsumogiri, forced: false });
+  assert(Array.isArray(legal) && legal.includes(event.tileId >> 2), 'the exact legal discard types are recorded');
+  for (const t of legal) assert(obs.hand.some((id) => (id >> 2) === t), 'legal types are in hand');
 
   const handChannel = encoded.data.slice(0, 34);
   const counts = T.countsFromIds(obs.hand);

@@ -72,6 +72,40 @@
     };
   };
 
+  // Legal-action masks are rebuilt from the public observation, the same way
+  // tools/policy/train_policy.py masks the training loss. A probability outside
+  // the mask is exactly zero, so an illegal action can never be selected.
+  const legalDiscardMask = function (view) {
+    const legal = new Array(34).fill(false);
+    if (view.riichi) { // after riichi the drawn tile must be discarded (tsumogiri)
+      if (view.drawnTile != null) legal[view.drawnTile >> 2] = true;
+      return legal;
+    }
+    const forbidden = new Set(view.forbidden || []);
+    for (const id of view.legalDiscards || view.hand || []) {
+      const t = id >> 2;
+      if (!forbidden.has(t)) legal[t] = true;
+    }
+    return legal;
+  };
+  const legalCallMask = function (opts) {
+    if (!opts) return [true, false, false, false, false];
+    return [true, !!((opts.chi || []).length), opts.pon != null, opts.kan != null, !!opts.ron];
+  };
+  const maskedSoftmax = function (values, legal) {
+    let max = -Infinity;
+    for (let i = 0; i < values.length; i++) if (legal[i] && values[i] > max) max = values[i];
+    const out = new Array(values.length).fill(0);
+    if (!Number.isFinite(max)) return out;
+    let sum = 0;
+    for (let i = 0; i < values.length; i++) if (legal[i]) { out[i] = Math.exp(values[i] - max); sum += out[i]; }
+    if (sum > 0) for (let i = 0; i < out.length; i++) out[i] /= sum;
+    return out;
+  };
+  P.legalDiscardMask = legalDiscardMask;
+  P.legalCallMask = legalCallMask;
+  P.maskedSoftmax = maskedSoftmax;
+
   const argmax = (values, legal) => {
     let best = -Infinity, index = -1;
     for (let i = 0; i < values.length; i++) {
@@ -89,23 +123,28 @@
   // rank the legal actions of the current observation.
   P.chooseDiscard = async function (model, view) {
     const out = await P.predict(model, view);
-    const legal = new Array(34).fill(false);
-    for (const id of view.legalDiscards || view.hand || []) {
-      const t = id >> 2;
-      if (!(view.forbidden || []).includes(t)) legal[t] = true;
-    }
+    const legal = legalDiscardMask(view);
     const tile = argmax(out.discard, legal);
     if (tile < 0) return null;
-    const riichiLogits = debias(out.riichi, model.priors && model.priors.riichi);
-    const riichi = !!view.canRiichi && riichiLogits[1] > riichiLogits[0];
-    return { tile, riichi, probabilities: out };
+    const riichiScores = debias(out.riichi, model.priors && model.priors.riichi);
+    const canRiichi = !!view.canRiichi;
+    const riichi = canRiichi && riichiScores[1] > riichiScores[0];
+    return {
+      tile, riichi,
+      probabilities: {
+        discard: maskedSoftmax(out.discard, legal),
+        riichi: maskedSoftmax(riichiScores, [true, canRiichi]),
+        call: maskedSoftmax(out.call, [true, true, true, true, true]),
+        win: maskedSoftmax(out.win, [true, true])
+      }
+    };
   };
 
   P.chooseCall = async function (model, view, opts) {
     if (!opts) return null;
     const out = await P.predict(model, view);
     const scores = debias(out.call, model.priors && model.priors.call);
-    const legal = [true, !!(opts.chi || []).length, opts.pon != null, opts.kan != null, !!opts.ron];
+    const legal = legalCallMask(opts);
     const index = argmax(scores, legal);
     // A call must beat pass by a small margin; otherwise the policy passes.
     if (index <= 0 || scores[index] <= scores[0] + (model.callMargin == null ? 0.25 : model.callMargin)) return null;

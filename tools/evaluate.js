@@ -163,6 +163,16 @@ async function evaluate(params) {
 (async () => {
   const args = parseArgs(process.argv.slice(2));
   if (args.help) { console.log(usage); return; }
+  for (const [flag, file] of [['--policy-model', args.policyModel], ['--candidate-policy', args.candidatePolicy],
+    ['--baseline-policy', args.baselinePolicy]]) {
+    if (file && !fs.existsSync(file)) throw new Error(`${flag}: model not found: ${file}`);
+  }
+  for (const [flag, file] of [['--candidate-policy', args.candidatePolicy], ['--baseline-policy', args.baselinePolicy],
+    ['--policy-model', args.policyModel]]) {
+    if (file) { try { require.resolve('onnxruntime-node'); } catch (_) {
+      throw new Error(`${flag}: onnxruntime-node is not installed (npm install onnxruntime-node)`);
+    } break; }
+  }
   const grpModel = args.grp ? JSON.parse(fs.readFileSync(args.grp, 'utf8')) : null;
   if (grpModel) MJ.rank.setRankModel(grpModel);
   const candidateRankModel = args.candidateGrp ? MJ.grp.validateModel(JSON.parse(fs.readFileSync(args.candidateGrp, 'utf8'))) : undefined;

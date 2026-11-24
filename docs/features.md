@@ -58,11 +58,11 @@
 
 `MJ.features.dataset(record)` は行動直前の観測からサンプルを作ります。
 
-- `discard`: `{ kind, tile, riichi, tsumogiri, forced, canRiichi }`（`canRiichi` はその打牌時点でリーチ宣言が可能だったか）
+- `discard`: `{ kind, tile, riichi, tsumogiri, forced, canRiichi, legal }`（`canRiichi` はその打牌時点でリーチ宣言が可能だったか、`legal` は喰い替えを除いた合法打牌の牌種リスト）
 - `tsumo`: ツモ和了（`end` イベント直前の観測）
 - `ron` / `pon` / `chi` / `kan` / `pass`: 応答判断
 - `meta.kind`: `discard` / `response` / `end`
-- 天鳳mjlog変換は実際の `call` だけを記録し `response` を持ちません。その場合は各打牌後に `Game#callOptions` で合法手を再構成し、次のイベント（`call` / ロンの `end` / それ以外）から鳴き・ロン・見送りをラベル付けします（`meta.synthetic=true`、`meta.ron/pon/kan/chi` に合法手の有無）。入力は公開観測のみで、他家の手牌・牌山は含みません。
+- 天鳳mjlog変換は実際の `call` だけを記録し `response` を持ちません。その場合は各打牌後に `Game#callOptions` で合法手を再構成し、次のイベント（`call` / ロンの `end` / それ以外）から鳴き・ロン・見送りをラベル付けします（`meta.synthetic=true`、`meta.ron/pon/kan/chi` に合法手の有無）。入力は公開観測のみで、他家の手牌・牌山は含みません。`legal` と `meta` の合法手フラグは、学習時の合法手マスクにそのまま使います。
 
 ## JSONL
 
@@ -79,13 +79,13 @@
 
 ## Parquet
 
-`python tools/to_parquet.py features-*.jsonl --out data/parquet` は以下を保存します。
+`python tools/to_parquet.py features-*.jsonl --out data/parquet` は `feature-parquet-v2` として以下を保存します。
 
-- 列: `schema_version`, `feature_version`, `hand`, `event`, `seat`, `kind`, `tile`, `riichi`, `tsumogiri`, `forced`, `channels`, `tiles`, `globals`, `x`（`list<float>`）, `channel_names`, `global_names`, `meta`
+- 列: `schema_version`, `feature_version`, `match`, `hand`, `event`, `seat`, `kind`, `tile`, `riichi`, `tsumogiri`, `forced`, `can_riichi`, `label`（JSON 文字列）, `channels`, `tiles`, `globals`, `x`（`list<float>`）, `channel_names`, `global_names`, `meta`（JSON 文字列）
 - ファイルメタデータ: `suitaku.schema_version`, `suitaku.feature_versions`, `suitaku.created_at`
 - `_metadata.json`: シャード一覧、行数、チャンネル名、グローバル名、版
 
-`x` は平坦化したまま保存します。読み込み側で `channels` / `tiles` / `globals` を使って `reshape(25, 34)` と末尾 31 に分けてください。
+`x` は平坦化したまま保存します。読み込み側で `channels` / `tiles` / `globals` を使って `reshape(25, 34)` と末尾 31 に分けてください。`label` を保存するため、`canRiichi`・`legal`・チーの牌など、列に落とさないラベル情報も失われません。`match` は試合単位の分割に使います。`feature-parquet-v1`（`match` / `label` 列なし）も `tools/policy/train_policy.py` は読み込めますが、試合分割がシャード単位に退化するため `feature-parquet-v2` で再生成してください。
 
 ## GRP（順位分布モデル）
 

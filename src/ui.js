@@ -417,11 +417,12 @@
     liveRecord.startDealer = startDealer; liveRecord.seed = seed;
     ui.autoDiscardWaited = false;
     ui.animationKey = null; $('log').innerHTML = ''; $('match-label').textContent = `${mode === 'hanchan' ? '半荘戦' : '東風戦'} / ${ui.level === 'strong' ? '思考型AI' : '標準AI'}`;
-    let state = { hand: 0, dealer: startDealer, startDealer, honba: 0, mode }, scores = [25000, 25000, 25000, 25000], sticks = 0;
+    let state = { hand: 0, dealer: startDealer, startDealer, honba: 0, mode }, scores = [25000, 25000, 25000, 25000], sticks = 0, dealIndex = 0;
     try {
       while (!state.ended && token === ui.token) {
+        const dealSeed = MJ.match.dealSeed(seed, dealIndex);
         const game = new MJ.Game({ agents: [humanAgent(token), pacedAI(1, token), pacedAI(2, token), pacedAI(3, token)],
-          rng: MJ.core.rng(seed + ':hand:' + state.hand),
+          rng: MJ.core.rng(dealSeed),
           // Every seat gets the same fixed check delay, whether or not it had a
           // legal call, so the pause does not disclose hidden call options.
           onCheck: () => new Promise((resolve) => setTimeout(resolve, MJ.pacing.checkDelay(ui.fast))),
@@ -429,7 +430,7 @@
         currentGame = game; ui.animationKey = null; ui.waitingResult = false;
         appendLog(`── ${state.hand < 4 ? '東' : '南'}${(state.hand % 4) + 1}局 ${state.honba}本場 ──`);
         const playing = game.playHand({ roundWind: 27 + Math.floor(state.hand / 4), dealer: state.dealer,
-          startDealer, rules, seed: seed + ':hand:' + state.hand,
+          startDealer, rules, seed: dealSeed,
           honba: state.honba, riichiSticks: sticks, scores: scores.slice(), hand: state.hand, mode: state.mode, rankConfig: ui.rankConfig });
         liveRecord.hands.push(game.recording);
         const res = await playing;
@@ -439,6 +440,7 @@
         await new Promise((resolve) => { ui.resultResolve = resolve; ui.waitingResult = true; showResultPanel(game, res); });
         if (token !== ui.token) return;
         state = MJ.match.advance(state, res, scores);
+        dealIndex++;
       }
       if (token !== ui.token) return;
       const ranked = MJ.rank.order(scores, state.startDealer).map((seat) => ({ score: scores[seat], seat }));

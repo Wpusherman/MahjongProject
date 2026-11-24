@@ -25,7 +25,7 @@ except ImportError as exc:  # pragma: no cover - exercised by environments witho
     print("to_parquet requires pyarrow: python -m pip install pyarrow", file=sys.stderr)
     raise SystemExit(2) from exc
 
-SCHEMA_VERSION = "features-parquet-v1"
+SCHEMA_VERSION = "features-parquet-v2"
 FEATURE_VERSION = "obs-v2"
 
 
@@ -43,6 +43,7 @@ def row_from(line: str, path: str, line_no: int) -> dict:
     return {
         "schema_version": SCHEMA_VERSION,
         "feature_version": str(row.get("v") or meta.get("version") or ""),
+        "match": str(row.get("match") or meta.get("match") or ""),
         "hand": int(row.get("hand", meta.get("hand", -1))),
         "event": int(row.get("event", meta.get("eventIndex", -1))),
         "seat": int(row.get("seat", meta.get("seat", -1))),
@@ -51,6 +52,8 @@ def row_from(line: str, path: str, line_no: int) -> dict:
         "riichi": bool(label.get("riichi", False)),
         "tsumogiri": bool(label.get("tsumogiri", False)),
         "forced": bool(label.get("forced", False)),
+        "can_riichi": bool(label.get("canRiichi", False)),
+        "label": json.dumps(label, separators=(",", ":"), ensure_ascii=False),
         "channels": channels,
         "tiles": tiles,
         "globals": globals_count,
@@ -65,6 +68,7 @@ def schema_for(rows: list[dict]) -> pa.Schema:
     return pa.schema([
         ("schema_version", pa.string()),
         ("feature_version", pa.string()),
+        ("match", pa.string()),
         ("hand", pa.int32()),
         ("event", pa.int32()),
         ("seat", pa.int8()),
@@ -73,6 +77,8 @@ def schema_for(rows: list[dict]) -> pa.Schema:
         ("riichi", pa.bool_()),
         ("tsumogiri", pa.bool_()),
         ("forced", pa.bool_()),
+        ("can_riichi", pa.bool_()),
+        ("label", pa.string()),
         ("channels", pa.int16()),
         ("tiles", pa.int16()),
         ("globals", pa.int16()),

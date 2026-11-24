@@ -70,6 +70,8 @@ jobs:
           node tools/features.js "Saved Data/suitaku-2026-10-13T09-48-02-146Z.json" "$RUNNER_TEMP/features.jsonl" --limit 200
           python tools/to_parquet.py "$RUNNER_TEMP/features.jsonl" --out "$RUNNER_TEMP/parquet" --shard-size 100
           python -c "import glob, os, pyarrow.parquet as pq; files=glob.glob(os.environ['RUNNER_TEMP']+'/parquet/*.parquet'); assert files; rows=sum(pq.read_table(f).num_rows for f in files); print('parquet rows', rows); assert rows == 200"
+      - name: Policy data check (Parquet reader + match split, no torch)
+        run: python tools/policy/train_policy.py --data "$RUNNER_TEMP/parquet" --check-data
       - name: mjai smoke
         run: |
           node tools/mjai-convert.js to-mjai "Saved Data/suitaku-2026-10-12T20-33-19-457Z.json" "$RUNNER_TEMP/out.jsonl"

@@ -481,6 +481,13 @@
   MJ.rules = { version: 'rules-v1', DEFAULT_RULES, RIICHI_ANKAN_MODES, normalize: normalizeRules,
     resolveStartDealer, resolveSeating };
   MJ.match = {
+    // Wall / deal seed for one hand of a match. The counter advances on every
+    // deal, including a repeated dealer (renchan) or an abortive draw, so those
+    // hands no longer reuse the previous wall. `handIndex` only tracks the
+    // round progression (East-1, East-2, ...) and must not seed the wall.
+    dealSeed(matchSeed, dealIndex) {
+      return `${matchSeed >>> 0}:wall:${dealIndex >>> 0}`;
+    },
     advance(state, result, scores) {
       const abort = result.type === 'draw' && result.reason !== 'exhaustive';
       const repeat = abort || (result.type === 'win' ? result.winner === state.dealer : result.tenpai.includes(state.dealer));

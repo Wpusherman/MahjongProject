@@ -180,7 +180,13 @@
         obs.furiten = game.isFuriten(seat);
         const x = F.encode(obs);
         const label = labelOf(event, event.options);
-        if (event.type === 'discard') { label.forced = !!game.players[seat].riichi; label.canRiichi = game.canRiichi(seat); }
+        if (event.type === 'discard') {
+          label.forced = !!game.players[seat].riichi;
+          label.canRiichi = game.canRiichi(seat);
+          // Exact legal discard types before the action (kuikae already removed).
+          // Training masks illegal tiles from this instead of re-deriving rules.
+          label.legal = [...new Set((obs.legalDiscards || []).map((id) => id >> 2))].sort((a, b) => a - b);
+        }
         samples.push({ hand: h, eventIndex: i, seat, x, label, match,
           meta: { version: F.version, hand: h, eventIndex: i, seat, turn: event.turn == null ? game.turnCount : event.turn,
             kind: event.type, riichi: !!game.players[seat].riichi } });

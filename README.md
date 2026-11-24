@@ -325,7 +325,89 @@ node train.js --eval weights.json --hands 240
 - 目的関数は候補席の平均最終点数です。局数が少ないと特定の牌山に過適合するので、`--hands` を増やし、最後に `--eval` で別シードを確認してください。
 - 主なオプションは `node train.js --help` を参照してください。
 
-テストは向聴（スート表とDFSの一致）・点数の回帰確認、王牌・フリテン・対局進行のルール確認、観測ビューの公開情報（他家の手牌ID・牌山・裏ドラを含まないこと、暗槓の赤非公開）、対局中牌譜のマスクと固定応答待ち時間（高速進行ON・ロン見逃しを含む）、core APIのgolden再現・決定性・136枚保存則、順位点と順位点EV、GRPの試合単位分割・24順列の行列入力和・モデル読み込み、mjai双方向変換・天鳳mjlogリプレイ・ルール差フラグ・牌山配置・座席視点マスク、特徴量の非漏えい・ラベル・JSONL、duplicate評価のhandicapクラスタ・開始状態・検出力・決定性・候補席モード・fast設定、受入牌リストの全34種一致、シード固定のAI対戦（点数・136枚の保存則・牌譜再生一致）、Chromiumによる実ブラウザー操作（画面幅・フォント・河配置・伏せ牌の非漏えい・新規対局・対局終了・書き出し／読み込み）を実行します。`npm test` は高速版、`npm run test:full` は完全版です。
+### 教師あり方策（policy）の学習と評価
+
+天鳳鳳凰卓（赤あり）の牌譜から、obs-v2 の **打牌 / リーチ / チー・ポン・カン / 見送り / 和了** ヘッドを教師あり学習し、ONNX を `onnxruntime-node` で動かします。牌譜・JSONL・Parquet はコミットしません（`.gitignore` の `data/`）。`tools/policy/train_policy.py` は JSONL と Parquet の両方を読み、試合単位で train/val/test に分割し、合法手マスクを損失に適用します。
+
+#### 1. データ（まず 1,000 半荘）
+
+```sh
+# 鳳凰卓の公開牌譜を取得（1 mjlog = 1 半荘）
+node tools/tenhou-fetch.js --out data/tenhou --hours 24 --logs 1000
+
+# mjlog -> strict 変換 -> obs-v2 特徴 -> JSONL を直接作る（推奨）
+node tools/policy-dataset.js data/tenhou --out data/policy/features.jsonl --limit 1000
+
+# 変換失敗率と除外内訳（三麻・九種九牌・赤なし等）を確認
+cat data/policy/features.jsonl.report.json
+```
+
+`--allow-diffs` を付けなければルール差のある試合は strict で除外され、`excludedByReason` に理由別件数が入ります。失敗率は `files` に対する `excluded + failures` で見ます。明示的に mjai を挟む場合は、各牌譜に `node tools/mjai-convert.js tenhou-to-suitaku <in.mjlog> <out.json> --strict` を実行してから `node tools/features.js <out.json> <features.jsonl>` を使ってください。
+
+```sh
+# JSONL -> Parquet（列: match / feature_version / x / label / meta など）
+python tools/to_parquet.py data/policy/features.jsonl --out data/policy/parquet --shard-size 100000
+
+# 読み込み・試合単位 90/5/5 分割の確認（torch 不要）
+npm run policy:check -- --data data/policy/parquet --val-fraction 0.05 --test-fraction 0.05
+```
+
+分割は `match` 単位・`--seed`（既定 `20261123`）固定です。試合数が 3 未満だと val/test は空になるので、疎通確認は 1,000 半荘以上で行ってください。
+
+#### 2. 疎通確認（ここで止まったら本学習に進まない）
+
+```sh
+# (a) 100 サンプルに過学習し、一致率がほぼ 100% になるか（未達なら終了コード 1）
+python tools/policy/train_policy.py --data data/policy/features.jsonl --overfit 100 --quick
+
+# (b) 合法手マスク: 合法手外の打牌/鳴き確率が厳密に 0 になるか
+node test/policy.test.js
+
+# (c) 他家の手牌を入れ替えても特徴・出力が変わらないか（公開情報のみ）
+node test/features.test.js
+```
+
+(a) は `OVERFIT OK: 0.99...` を確認します。`--quick` は 4 ブロック / 64ch、`--overfit` は既定 300 epoch です。
+
+#### 3. 本学習（1 万〜数万半荘 / 10 ブロック / 128ch）
+
+```sh
+python tools/policy/train_policy.py --data data/policy/parquet \
+  --width 128 --blocks 10 --epochs 6 --batch-size 256 \
+  --out-dir test-results/policy-model
+```
+
+出力は `policy.onnx`・`policy.pt`・`policy.json` です。`policy.json` に `split`（試合数と行数）、`heads`、`classWeights`、`history`、`metrics.train/val/test` が入ります。判断種別の test 一致率は `metrics.test.discard.top1Masked`、`metrics.test.riichi.accuracy`、`metrics.test.call.accuracy`（`perClass` に pass/chi/pon/kan/ron の recall）、`metrics.test.win.accuracy` を確認してください。打牌はまず 6〜7 割台を目安にします。`illegalMass` はマスク前の参考値、`maskedIllegalMass` は 0（`maskOk: true`）です。ONNX の隣に置いた `policy.json` の `classWeights` は推論時の prior 補正に自動で使われます。
+
+```sh
+# 推論スループット（バッチ別）
+node tools/policy-bench.js --model test-results/policy-model/policy.onnx --samples 2048
+```
+
+#### 4. 対戦評価（standard AI と 1v3 duplicate）
+
+```sh
+node tools/evaluate.js \
+  --candidate-policy test-results/policy-model/policy.onnx \
+  --baseline-level standard \
+  --seeds 1000 --workers 8 \
+  --start-dealer random \
+  --match hanchan \
+  --out test-results/policy-eval.json
+```
+
+既定の `--candidate-seat rotate` は同じ牌山で候補を 4 席すべてに置く 1v3 duplicate です。`--control` を付けると baseline 同士のペア差分も出ます。レポートには平均順位点（`seedClusterRankPoints` の mean と 95% CI）、和了率（`tsumoRate` / `ronRate`）、放銃率 `dealInRate`、副露率 `callRate`、リーチ率 `riichiRate` が入ります。`--policy-model` は両側、`--baseline-policy` は基準側だけに別モデルを指定します。一時モデルを通す場合は `--policy-model` を `--level fast` と併用すると確認が速いです。
+
+#### 5. GRP の再学習
+
+```sh
+node tools/grp-dataset.js data/tenhou --out test-results/grp-tenhou.jsonl
+python tools/grp/train_grp.py --train test-results/grp-tenhou.jsonl --out-dir test-results/grp-model
+```
+
+局別（東1〜南4）の表を自己対戦版と比べる場合は `docs/grp.md` の手順に従ってください。
+
+テストは向聴（スート表とDFSの一致）・点数の回帰確認、王牌・フリテン・対局進行のルール確認、観測ビューの公開情報（他家の手牌ID・牌山・裏ドラを含まないこと、暗槓の赤非公開）、対局中牌譜のマスクと固定応答待ち時間（高速進行ON・ロン見逃しを含む）、core APIのgolden再現・決定性・136枚保存則、順位点と順位点EV、GRPの試合単位分割・24順列の行列入力和・モデル読み込み、mjai双方向変換・天鳳mjlogリプレイ・ルール差フラグ・牌山配置・座席視点マスク、特徴量の非漏えい・ラベル・JSONL、policy推論の合法手マスク（合法手外の確率0）・強制ツモ切り、duplicate評価のhandicapクラスタ・開始状態・検出力・決定性・候補席モード・fast設定、受入牌リストの全34種一致、シード固定のAI対戦（点数・136枚の保存則・牌譜再生一致）、Chromiumによる実ブラウザー操作（画面幅・フォント・河配置・伏せ牌の非漏えい・新規対局・対局終了・書き出し／読み込み）を実行します。`npm test` は高速版、`npm run test:full` は完全版です。
 
 ## 未着手・今後の作業
 

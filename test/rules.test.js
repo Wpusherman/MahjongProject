@@ -51,6 +51,23 @@ async function playSeatMatch(mode, startDealer) {
   }
   return { ended: state.ended, hand: state.hand, dealer: state.dealer, scores, sticks, deals };
 }
+// The match wall seed must advance on every deal. `hand` (the round index) stays
+// put on a dealer repeat (renchan) or a draw, so it cannot seed the wall. This
+// mirrors src/ui.js, which uses MJ.match.dealSeed for each hand.
+function dealWalls(matchSeed, startDealer, mode, maxDeals = 16) {
+  const walls = [];
+  let state = { hand: 0, dealer: startDealer, startDealer, honba: 0, mode };
+  for (let dealIndex = 0; !state.ended && dealIndex < maxDeals; dealIndex++) {
+    walls.push(MJ.tiles.buildWall(MJ.core.rng(MJ.match.dealSeed(matchSeed, dealIndex))));
+    // Force a renchan on two of every three deals so the round index does not move.
+    const result = dealIndex % 3 === 0 ? { type: 'win', winner: state.dealer }
+      : dealIndex % 3 === 1 ? { type: 'draw', reason: 'exhaustive', tenpai: [state.dealer] }
+        : { type: 'win', winner: (state.dealer + 1) % 4 };
+    state = MJ.match.advance(state, result, [25000, 25000, 25000, 25000]);
+  }
+  return walls;
+}
+const allDistinct = (walls) => new Set(walls.map((w) => w.join(','))).size === walls.length;
 function score(text, tile, extra = {}) {
   const ctx = { counts: T.countsFromIds(ids(text)), melds: [], winTile: ids(tile)[0] >> 2, tsumo: false,
     roundWind: 27, seatWind: 28, doraIndicators: [], uraIndicators: [], redIds: [], ...extra };
@@ -305,6 +322,57 @@ function score(text, tile, extra = {}) {
     assert.equal(played.hand, mode === 'hanchan' ? 8 : 4, `${mode} plays the correct number of dealer moves`);
     assert.equal(played.dealer, (start + played.hand) % 4, 'the final dealer follows the start dealer rotation');
     assert.equal(played.scores.reduce((a, b) => a + b, 0) + played.sticks * 1000, 100000, 'scores and deposits are conserved');
+  }
+  // Per-deal wall seeds: distinct on every deal and reproducible per match seed.
+  assert.notEqual(MJ.match.dealSeed(123, 0), MJ.match.dealSeed(123, 1), 'successive deals get different wall seeds');
+  assert.notEqual(MJ.match.dealSeed(123, 0), MJ.match.dealSeed(124, 0), 'different matches get different wall seeds');
+  assert.equal(MJ.match.dealSeed(123, 7), MJ.match.dealSeed(123, 7), 'a deal seed is deterministic');
+  for (const mode of ['tonpu', 'hanchan']) for (let s = 0; s < 32; s++) {
+    for (const fixed of [0, 1, 2, 3]) {
+      const walls = dealWalls(s, fixed, mode);
+      assert(allDistinct(walls), `every deal wall differs (${mode} seed ${s} dealer ${fixed})`);
+      assert.deepEqual(dealWalls(s, fixed, mode), walls, 'the same match seed replays the same walls');
+    }
+    const randomStart = MJ.rules.resolveStartDealer('random', s);
+    assert(allDistinct(dealWalls(s, randomStart, mode)), `random start dealer walls differ (${mode} seed ${s})`);
+  }
+  // Explicit regression: East-1 0 honba -> renchan East-1 1 honba. The round
+  // index stays 0, but the deal counter advances, so the walls must differ.
+  const east1 = { hand: 0, dealer: 2, startDealer: 2, honba: 0, mode: 'tonpu' };
+  const repeat = MJ.match.advance(east1, { type: 'win', winner: 2 }, [25000, 25000, 25000, 25000]);
+  assert.equal(repeat.hand, 0, 'renchan keeps the round index');
+  assert.equal(repeat.honba, 1);
+  assert.notDeepEqual(MJ.tiles.buildWall(MJ.core.rng(MJ.match.dealSeed(77, 0))),
+    MJ.tiles.buildWall(MJ.core.rng(MJ.match.dealSeed(77, 1))), 'East-1 0 honba and East-1 1 honba do not share a wall');
+  // Real hands driven with the production deal seed stay distinct and replayable.
+  {
+    const makeAgents = () => [0, 1, 2, 3].map(() => ({
+      lastCallAnalysis: null, wantTsumo: async () => false, wantCall: async () => null, wantKan: async () => null,
+      chooseDiscard: async (view) => ({ tileId: view.riichi ? view.drawnTile
+        : (view.legalDiscards && view.legalDiscards.length ? view.legalDiscards[0] : view.hand[0]), riichi: false })
+    }));
+    const run = async (matchSeed, startDealer, mode) => {
+      const walls = [];
+      let state = { hand: 0, dealer: startDealer, startDealer, honba: 0, mode };
+      let scores = [25000, 25000, 25000, 25000], sticks = 0;
+      for (let dealIndex = 0; !state.ended && dealIndex < 40; dealIndex++) {
+        const dealSeed = MJ.match.dealSeed(matchSeed, dealIndex);
+        const game = new MJ.Game({ agents: makeAgents(), rng: MJ.core.rng(dealSeed) });
+        const result = await game.playHand({ roundWind: 27 + Math.floor(state.hand / 4), dealer: state.dealer,
+          startDealer: state.startDealer, honba: state.honba, riichiSticks: sticks, scores: scores.slice(),
+          hand: state.hand, mode, seed: dealSeed });
+        walls.push(game.wall.slice());
+        scores = game.players.map((p) => p.score); sticks = game.riichiSticks;
+        const next = MJ.match.advance(state, result, scores);
+        state = { hand: next.hand, dealer: next.dealer, startDealer, honba: next.honba, mode };
+      }
+      return walls;
+    };
+    for (const mode of ['tonpu', 'hanchan']) {
+      const first = await run(4242, 1, mode), second = await run(4242, 1, mode);
+      assert(allDistinct(first), `real match walls all differ (${mode})`);
+      assert.deepEqual(first, second, `real match walls replay from the same seed (${mode})`);
+    }
   }
   const seatGame = new MJ.Game({ agents: [] });
   seatGame.setup({ roundWind: 27, dealer: 1, startDealer: 1, scores: [25000, 25000, 25000, 25000], hand: 0,
